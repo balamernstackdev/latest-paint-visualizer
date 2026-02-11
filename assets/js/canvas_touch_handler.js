@@ -164,6 +164,17 @@
             const canvasElements = iframe.contentDocument.querySelectorAll('canvas');
             canvasElements.forEach(canvas => {
                 canvas.dataset.drawingMode = DRAWING_MODE;
+
+                // SYNC: Always check if points are cleared (runs every 1s)
+                // This ensures dots are removed if Python clears the points
+                if (!window.parent.STREAMLIT_POLY_POINTS || window.parent.STREAMLIT_POLY_POINTS.length === 0) {
+                    const dots = window.parent.POLYGON_DOTS || [];
+                    if (dots.length > 0) {
+                        dots.forEach(d => d.remove());
+                        window.parent.POLYGON_DOTS = [];
+                    }
+                }
+
                 if (canvas.dataset.hasProxy === "true") return;
 
                 canvas.style.touchAction = "none";
@@ -280,6 +291,39 @@
                     updatePolyPts(window.parent.STREAMLIT_POLY_POINTS);
                 };
 
+                const clearPersistentDots = () => {
+                    try {
+                        const dots = window.parent.POLYGON_DOTS || [];
+                        dots.forEach(d => d.remove());
+                        window.parent.POLYGON_DOTS = [];
+                    } catch (e) { }
+                };
+
+                const showPersistentDot = (clientX, clientY) => {
+                    try {
+                        const dot = parent.document.createElement('div');
+                        dot.className = 'polygon-dot-marker';
+                        dot.style.position = 'fixed';
+                        dot.style.left = clientX + 'px';
+                        dot.style.top = clientY + 'px';
+                        dot.style.width = '12px';
+                        dot.style.height = '12px';
+                        dot.style.backgroundColor = '#ff4b4b';
+                        dot.style.border = '2px solid white';
+                        dot.style.borderRadius = '50%';
+                        dot.style.zIndex = '999999';
+                        dot.style.transform = 'translate(-50%, -50%)';
+                        dot.style.pointerEvents = 'none';
+                        dot.style.boxShadow = '0 2px 4px rgba(0,0,0,0.3)';
+                        parent.document.body.appendChild(dot);
+
+                        window.parent.POLYGON_DOTS = window.parent.POLYGON_DOTS || [];
+                        window.parent.POLYGON_DOTS.push(dot);
+                    } catch (e) { }
+                };
+
+                // Removed ineffective sync logic from here
+
                 const sendEvent = (type, e) => {
                     const rect = canvas.getBoundingClientRect();
                     const scaleX = rect.width > 0 ? (CANVAS_WIDTH / rect.width) : 1;
@@ -328,18 +372,40 @@
                             if (isDoubleClick) {
                                 // Double-click detected: Sync points and trigger auto-finish
                                 const polyPts = window.parent.STREAMLIT_POLY_POINTS || [];
+                                console.log('[Polygon] Double-tap detected, points:', polyPts.length);
+
                                 if (polyPts && polyPts.length > 0) {
                                     const ptsStr = polyPts.map(p => `${Math.round(p.x)},${Math.round(p.y)}`).join(";");
                                     const currentUrl = new URL(parent.location.href);
                                     currentUrl.searchParams.set('poly_pts', ptsStr);
                                     currentUrl.searchParams.set('force_finish', 'true');
-                                    if (throttledPushState(currentUrl)) {
-                                        triggerRerun();
+
+                                    const pushed = throttledPushState(currentUrl);
+                                    if (!pushed) {
+                                        // Use replaceState if throttled
+                                        console.log('[Polygon] Using replaceState for finish');
+                                        parent.history.replaceState({}, '', currentUrl.toString());
                                     }
+
+                                    // Always trigger rerun for polygon finish
+                                    triggerRerun();
+                                    clearPersistentDots(); // CLEAR DOTS ON FINISH
                                 }
                             } else {
-                                // Single click: Just add point
+                                // Single click: Add point
+                                console.log('[Polygon] Single tap - adding point at', offX, offY);
                                 addPolygonalPoint(offX, offY);
+
+                                // FIX: Calculate GLOBAL coordinates for the dot (including iframe offset)
+                                const iframe = getActiveIframe(); // Re-fetch to be safe
+                                if (iframe) {
+                                    const rect = iframe.getBoundingClientRect();
+                                    const globalX = rect.left + e.clientX;
+                                    const globalY = rect.top + e.clientY;
+                                    showPersistentDot(globalX, globalY);
+                                } else {
+                                    showPersistentDot(e.clientX, e.clientY); // Fallback
+                                }
                             }
                             globalLastTapTime = now;
                         } else if (["point", "freedraw", "rect"].includes(canvas.dataset.drawingMode)) {
