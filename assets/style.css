@@ -269,7 +269,19 @@ div[data-testid="stVerticalBlockBordered"] {
     }
 }
 
-/* REVERTED: Restoring stable native layout to fix missing sidebar button */
+/* HIDE LIVE UI NOISE (Share, GitHub, Star, Menu) */
+[data-testid="stDecoration"],
+[data-testid="stToolbarActions"],
+[data-testid="stMainMenu"] {
+    display: none !important;
+}
+
+/* Ensure Sidebar Toggle (>>) stays visible */
+header [data-testid="stSidebarCollapseButton"] {
+    display: flex !important;
+    visibility: visible !important;
+}
+
 header {
     background-color: transparent !important;
 }
