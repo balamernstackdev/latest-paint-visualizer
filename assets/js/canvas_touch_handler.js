@@ -119,8 +119,9 @@
     }
 
     // Double-click tracking (must persist across setupInteraction() calls)
-    let globalLastTapTime = 0;
-    const DBL_TAP_WINDOW = 250; // Reduced from 350ms for more precise detection
+    // Double-click tracking (Persist in parent window to survive fragment reruns)
+    if (!window.parent._LASSO_LAST_TAP) window.parent._LASSO_LAST_TAP = 0;
+    const DBL_TAP_WINDOW = 350; // 350ms is standard for touch-to-double-click
 
     // --- THROTTLE HISTORY UPDATES TO PREVENT "Bad message format" ERROR ---
     // Browser limit: 100 pushState calls per 10 seconds
@@ -131,27 +132,11 @@
     const MIN_HISTORY_INTERVAL = 200; // Minimum 200ms between calls (5 per second)
     let lastHistoryCall = 0;
 
-    const throttledPushState = (url) => {
+    const throttledReplaceState = (url) => {
         const now = Date.now();
+        if (now - lastHistoryCall < 50) return false; // Simple 50ms throttle for replaceState
 
-        // Remove calls older than 10 seconds
-        historyCallTimes = historyCallTimes.filter(t => (now - t) < HISTORY_WINDOW);
-
-        // Check if we've hit the limit
-        if (historyCallTimes.length >= MAX_HISTORY_CALLS) {
-            console.warn('[Throttle] History pushState limit reached, skipping update');
-            return false;
-        }
-
-        // Check minimum interval
-        if (now - lastHistoryCall < MIN_HISTORY_INTERVAL) {
-            console.warn('[Throttle] Too soon since last pushState, skipping');
-            return false;
-        }
-
-        // Safe to call
-        parent.history.pushState({}, '', url.toString());
-        historyCallTimes.push(now);
+        parent.history.replaceState({}, '', url.toString());
         lastHistoryCall = now;
         return true;
     };
@@ -216,19 +201,15 @@
                 const updateTap = (x, y) => {
                     const currentUrl = new URL(parent.location.href);
                     currentUrl.searchParams.set('tap', `${Math.round(x)},${Math.round(y)}`);
+                    currentUrl.searchParams.delete('force_finish');
+                    currentUrl.searchParams.delete('pan_update');
+                    currentUrl.searchParams.delete('zoom_update');
 
                     // Store tap in window for Python to read
                     window.parent.LAST_TAP_COORDS = { x: Math.round(x), y: Math.round(y), timestamp: Date.now() };
 
-                    // Try throttled pushState first
-                    const pushed = throttledPushState(currentUrl);
-
-                    if (!pushed) {
-                        // Throttled! Use replaceState instead (doesn't count toward limit)
-                        // This updates the URL so Python can see it without crashing history
-                        console.log('[Tap] Using replaceState due to throttle');
-                        parent.history.replaceState({}, '', currentUrl.toString());
-                    }
+                    // Use throttled replaceState (doesn't count toward history limit)
+                    throttledReplaceState(currentUrl);
 
                     // Always trigger rerun for taps
                     triggerRerun();
@@ -237,12 +218,10 @@
                 const updatePan = (px, py) => {
                     const currentUrl = new URL(parent.location.href);
                     currentUrl.searchParams.set('pan_update', `${px.toFixed(4)},${py.toFixed(4)}`);
+                    currentUrl.searchParams.delete('force_finish');
+                    currentUrl.searchParams.delete('tap');
 
-                    const pushed = throttledPushState(currentUrl);
-                    if (!pushed) {
-                        // Fallback to replaceState if pushState is throttled
-                        parent.history.replaceState({}, '', currentUrl.toString());
-                    }
+                    throttledReplaceState(currentUrl);
 
                     // Always trigger rerun for panning to maintain responsiveness
                     triggerRerun();
@@ -256,6 +235,10 @@
                         const ptsStr = pts.map(p => `${Math.round(p.x)},${Math.round(p.y)}`).join(";");
                         const currentUrl = new URL(parent.location.href);
                         currentUrl.searchParams.set('poly_pts', ptsStr);
+
+                        // FIX: Explicitly clear signals that should only trigger once
+                        currentUrl.searchParams.delete('force_finish');
+                        currentUrl.searchParams.delete('tap');
 
                         // IMPORTANT: Use replaceState for point updates to avoid history limit
                         // This updates the URL so Python can see it, but doesn't count against pushState limit
@@ -376,7 +359,8 @@
                         showFeedbackDot(e.clientX, e.clientY);
                         if (canvas.dataset.drawingMode === "polygon") {
                             const now = Date.now();
-                            const isDoubleClick = (now - globalLastTapTime < DBL_TAP_WINDOW);
+                            const isDoubleClick = (now - (window.parent._LASSO_LAST_TAP || 0) < DBL_TAP_WINDOW);
+                            window.parent._LASSO_LAST_TAP = now;
 
                             if (isDoubleClick) {
                                 // Double-click detected: Sync points and trigger auto-finish
@@ -389,12 +373,7 @@
                                     currentUrl.searchParams.set('poly_pts', ptsStr);
                                     currentUrl.searchParams.set('force_finish', 'true');
 
-                                    const pushed = throttledPushState(currentUrl);
-                                    if (!pushed) {
-                                        // Use replaceState if throttled
-                                        console.log('[Polygon] Using replaceState for finish');
-                                        parent.history.replaceState({}, '', currentUrl.toString());
-                                    }
+                                    throttledReplaceState(currentUrl);
 
                                     // Always trigger rerun for polygon finish
                                     triggerRerun();
@@ -416,7 +395,6 @@
                                     showPersistentDot(e.clientX, e.clientY); // Fallback
                                 }
                             }
-                            globalLastTapTime = now;
                         } else if (["point", "freedraw", "rect"].includes(canvas.dataset.drawingMode)) {
                             updateTap(offX, offY);
                         }

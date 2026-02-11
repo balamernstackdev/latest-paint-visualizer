@@ -681,11 +681,12 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                     # DEFENSIVE: Clear force_finish immediately if it exists
                     force_finish_url = False
                     if "force_finish" in st.query_params:
-                        force_finish_url = st.query_params.get("force_finish") == "true"
+                        ff_val = str(st.query_params.get("force_finish")).lower()
+                        force_finish_url = ff_val in ["true", "1", "yes"]
                         st.query_params.pop("force_finish")
                         # 🏁 STORE PERSISTENTLY FOR UI CLEANUP logic later in script
                         st.session_state["just_finished_poly"] = True
-                        print(f"DEBUG: Cleared force_finish from URL (value was: {force_finish_url})")
+                        print(f"DEBUG: Cleared force_finish from URL (parsed: {force_finish_url})")
                     
                     # Capture force finish from session state
                     force_finish = st.session_state.get("force_finish_poly", False) or force_finish_url
@@ -693,14 +694,21 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                     url_pts = []
                     if url_pts_raw:
                         try:
-                            raw_str = str(url_pts_raw)
+                            # 🧩 Robustly handle list or string from Streamlit query params
+                            if isinstance(url_pts_raw, (list, tuple)):
+                                raw_str = str(url_pts_raw[0])
+                            else:
+                                raw_str = str(url_pts_raw)
+                            
                             for p in raw_str.split(";"):
                                 if "," in p:
-                                    px, py = p.split(",")
-                                    # Convert captured canvas-space coords to image-space
-                                    url_pts.append([int(float(px) / scale_factor) + start_x, int(float(py) / scale_factor) + start_y])
-                            if force_finish: print(f"DEBUG: Parsed URL Pts: {len(url_pts)} from '{raw_str[:50]}...'")
-                        except Exception as pe: print(f"DEBUG: Poly Parse Err: {pe}")
+                                    try:
+                                        px, py = p.split(",")
+                                        # Convert captured canvas-space coords to image-space
+                                        url_pts.append([int(float(px) / scale_factor) + start_x, int(float(py) / scale_factor) + start_y])
+                                    except: pass
+                            if force_finish: print(f"DEBUG: Parsed URL Pts: {len(url_pts)} from '{raw_str[:100]}...'")
+                        except Exception as pe: print(f"DEBUG: Poly Parse Err: {pe} | Raw: '{url_pts_raw}'")
 
                     target_obj = None
                     for obj in reversed(objects):
@@ -718,6 +726,7 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                     
                     # 🏁 FINISH TRIGGER - Only trigger on explicit FINISH button click
                     if force_finish:
+                        # ALWAYS clear the session state signal immediately to prevent loops
                         st.session_state["force_finish_poly"] = False 
                         pts = []
                         
@@ -747,32 +756,30 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                         
                         if len(pts) > 2:
                             print(f"DEBUG: APPLY POLYGON -> Points: {len(pts)}, Force Finish: {force_finish}, Tool: {tool_mode}")
-                            # 🎯 FIX DISTORTION: Remove sort_points_clockwise
-                            # pts = sort_points_clockwise(pts) 
                             mask = np.zeros((h, w), dtype=np.uint8)
                             cv2.fillPoly(mask, [np.array(pts, np.int32)], 255)
                             final_mask = mask > 0
                             if final_mask.any():
-                                # DEBUG: Log operation mode before applying
                                 current_op = st.session_state.get("selection_op", "Unknown")
                                 print(f"DEBUG: POLYGONAL LASSO APPLY -> Operation: {current_op}, Mask pixels: {np.sum(final_mask)}")
-                                
                                 st.session_state["pending_selection"] = {'mask': final_mask}
                                 cb_apply_pending() 
                                 st.session_state["canvas_id"] = st.session_state.get("canvas_id", 0) + 1
                                 st.session_state["render_id"] += 1
-                                if "poly_pts" in st.query_params:
-                                    st.query_params.pop("poly_pts", None)
-                                if "force_finish" in st.query_params:
-                                    st.query_params.pop("force_finish", None)
-                                
-                                # Clear local storage too
+                                for pk in ["poly_pts", "force_finish", "tap"]:
+                                    if pk in st.query_params: st.query_params.pop(pk, None)
                                 components.html("<script>window.parent.STREAMLIT_POLY_POINTS = [];</script>", height=0)
                                 safe_rerun()
                             else:
-                                if force_finish: print(f"DEBUG: Skipping Poly Apply - Not enough points ({len(pts)})")
-                                if "force_finish" in st.query_params: st.query_params.pop("force_finish", None)
-                                if "poly_pts" in st.query_params: st.query_params.pop("poly_pts", None)
+                                if force_finish: print(f"DEBUG: Skipping Poly Apply - Empty Mask")
+                                for pk in ["poly_pts", "force_finish", "tap"]:
+                                    if pk in st.query_params: st.query_params.pop(pk, None)
+                                safe_rerun()
+                        else:
+                            if force_finish: 
+                                print(f"DEBUG: Ignoring FINISH signal - Not enough points ({len(pts)})")
+                                for pk in ["poly_pts", "force_finish", "tap"]:
+                                    if pk in st.query_params: st.query_params.pop(pk, None)
                                 safe_rerun()
                 except Exception as e: logging.error(f"Poly Error: {e}")
                 
