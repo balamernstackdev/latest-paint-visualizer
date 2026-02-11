@@ -225,7 +225,7 @@
 
                     if (!pushed) {
                         // Throttled! Use replaceState instead (doesn't count toward limit)
-                        // This updates the URL without adding to history
+                        // This updates the URL so Python can see it without crashing history
                         console.log('[Tap] Using replaceState due to throttle');
                         parent.history.replaceState({}, '', currentUrl.toString());
                     }

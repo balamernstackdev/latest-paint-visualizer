@@ -28,11 +28,7 @@
     }
 }
 
-/* DISABLE CLICK-OUTSIDE-TO-CLOSE */
-[data-testid="stSidebarOverlay"] {
-    pointer-events: none !important;
-    cursor: default !important;
-}
+/* REVERTED: Click-outside-to-close restored */
 
 .stMarkdown h3 {
     font-size: 1.1rem !important;
@@ -273,37 +269,14 @@ div[data-testid="stVerticalBlockBordered"] {
     }
 }
 
-/* HIDE UI NOISE (Keep Toggle Buttons) */
-[data-testid="stDecoration"],
-.stDeployButton {
-    display: none !important;
-}
+/* REVERTED: Standard Streamlit header elements restored */
 
-/* Make Header Transparent but allow children (Toggle Button) */
+/* REVERTED: Custom header overrides removed to restore native layout */
 header {
     background-color: transparent !important;
-    border-bottom: none !important;
-    z-index: 999999 !important;
 }
 
-/* REFINED SIDEBAR TOGGLES */
-[data-testid="stSidebarCollapseButton"] {
-    display: flex !important;
-    visibility: visible !important;
-    opacity: 1 !important;
-    z-index: 9999999 !important;
-    background-color: transparent !important;
-    border: none !important;
-    box-shadow: none !important;
-    padding: 5px !important;
-}
-
-@media (max-width: 640px) {
-    [data-testid="stSidebarCollapseButton"] {
-        padding: 8px !important;
-        /* Larger touch target for mobile */
-    }
-}
+/* REVERTED: Custom sidebar button overrides removed to restore native behavior */
 
 [data-testid="stSidebarCollapseButton"] svg {
     fill: #31333F !important;
@@ -312,23 +285,7 @@ header {
     height: 20px !important;
 }
 
-/* Position the 'Open' button (when sidebar closed) */
-header [data-testid="stSidebarCollapseButton"] {
-    top: 8px !important;
-    left: 8px !important;
-}
-
-/* Position the 'Close' button (when sidebar open) */
-[data-testid="stSidebar"] [data-testid="stSidebarCollapseButton"] {
-    top: 8px !important;
-    right: 8px !important;
-    left: auto !important;
-}
-
-/* Sidebar Padding override - Remove top gap */
-section[data-testid="stSidebarContent"]>div:first-child {
-    padding-top: 0rem !important;
-}
+/* REVERTED: Sidebar top padding restored */
 
 /* Hide Streamlit elements */
 #MainMenu {
@@ -403,6 +360,7 @@ button[key="global_sync_btn"] {
         display: none !important;
     }
 }
+
 /* Desktop hide using data attribute */
 @media (min-width: 1025px) {
     [data-desktop-hide="true"] {

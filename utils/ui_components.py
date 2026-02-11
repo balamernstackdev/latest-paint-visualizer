@@ -201,7 +201,7 @@ def setup_styles():
             --font: "Segoe UI", sans-serif;
         }}
         
-        .stApp {{ background-color: #f5f5f5; }}
+
         
         [data-testid="stSidebar"] {{
             background-color: #f8f9fa !important; 
@@ -233,10 +233,8 @@ def setup_styles():
             }}
         }}
 
-        [data-testid="stSidebarOverlay"] {{
-            pointer-events: none !important;
-            cursor: default !important;
-        }}
+
+        /* Restored native overlay behavior */
 
         /* Hide Ghost Sync Button */
         div[data-testid="stButton"]:has(button p:contains("GHOST")) {{ display: none !important; }}
@@ -245,105 +243,8 @@ def setup_styles():
         div[data-testid="stButton"]:has(button:contains("GLOBAL SYNC")) {{ display: none !important; }}
         .sync-ghost-marker + div[data-testid="stButton"] {{ display: none !important; }}
 
-        /* 🚀 POSITION SIDEBAR TOGGLE TO THE LEFT (Drawer Style) */
-        [data-testid="stSidebarCollapseButton"] {{
-            display: flex !important;
-            visibility: visible !important;
-            opacity: 1 !important;
-            z-index: 9999999 !important;
-            background-color: transparent !important;
-            border: none !important;
-            pointer-events: auto !important;
-        }}
 
-        /* 📱 MOBILE OPTIMIZATIONS */
-        @media (max-width: 768px) {{
-            /* Large touch targets for buttons */
-            .stButton > button {{
-                min-height: 48px !important;
-                font-size: 16px !important;
-            }}
-            
-            /* Remove margins that waste space on small screens */
-            .block-container {{
-                padding-left: 0.5rem !important;
-                padding-right: 0.5rem !important;
-                padding-top: 1rem !important;
-            }}
-            
-            /* Make color picker easier to tap */
-            [data-testid="stColorPicker"] > div {{
-                min-height: 48px !important;
-            }}
-            
-            /* Center the canvas for better thumb reach */
-            .stCanvasWrapper {{
-                margin: 0 auto !important;
-            }}
-
-            /* Thumb-friendly horizontal scroll for tool segments if they overflow */
-            [data-testid="stHorizontalBlock"] {{
-                gap: 5px !important;
-            }}
-
-            /* CRITICAL: Sidebar toggle button must be large enough for mobile touch */
-            [data-testid="stSidebarCollapseButton"] {{
-                min-width: 44px !important;
-                min-height: 44px !important;
-                padding: 12px !important;
-                background-color: rgba(255, 255, 255, 0.95) !important;
-                border-radius: 8px !important;
-                box-shadow: 0 2px 8px rgba(0,0,0,0.15) !important;
-                z-index: 999999999 !important;
-                pointer-events: auto !important;
-                touch-action: manipulation !important;
-            }}
-
-            [data-testid="stSidebarCollapseButton"]:active {{
-                background-color: rgba(0,0,0,0.1) !important;
-                transform: scale(0.95);
-            }}
-
-            [data-testid="stSidebarCollapseButton"] svg {{
-                width: 20px !important;
-                height: 20px !important;
-            }}
-        }}
-        
-        /* When sidebar is OPEN, move the close button to the RIGHT side */
-        [data-testid="stSidebar"] [data-testid="stSidebarCollapseButton"] {{
-            position: fixed !important;
-            top: 10px !important;
-            left: auto !important;
-            right: 10px !important;
-            z-index: 999999999 !important;
-        }}
-
-        /* When sidebar is CLOSED, ensure the open button is at the top left */
-        [data-testid="stHeader"] [data-testid="stSidebarCollapseButton"] {{
-            position: fixed !important;
-            top: 10px !important;
-            left: 10px !important;
-            right: auto !important;
-            z-index: 999999999 !important;
-        }}
-
-        [data-testid="stSidebarCollapseButton"] svg {{
-            fill: #31333F !important;
-            color: #31333F !important;
-            width: 20px !important;
-            height: 20px !important;
-        }}
-
-        header[data-testid="stHeader"] {{
-            background: transparent !important;
-            z-index: 1000 !important;
-        }}
-
-        /* HIDE CUSTOM BUTTON WRAPPERS */
-        .m-open-container, .m-close-inner {{
-            display: none !important;
-        }}
+        /* Restored native sidebar and header behavior */
 
         /* Enhanced Card Look */
         div[data-testid="stVerticalBlockBordered"] {{
@@ -1084,10 +985,7 @@ def render_visualizer_engine_v11(display_width):
 
     # Removed tuning_container from top - moved to bottom
 
-@st.fragment
-def sidebar_toggle_fragment():
-    """Native sidebar logic is now preferred. Custom buttons removed."""
-    pass
+
 
 def render_sidebar(sam, device_str):
     # --- 🌐 EXTRACT TRACKED POINTS (FOR DEBUG) ---
@@ -1100,14 +998,13 @@ def render_sidebar(sam, device_str):
             url_pts_count = len(raw_pts_str.split(";")) if raw_pts_str else 0
         except: pass
 
-    # --- 🛡️ GHOST ARROW (Open) ---
-    sidebar_toggle_fragment()
+
 
     with st.sidebar:
         # --- Native Sidebar Logic handles close ---
         pass
 
-        st.markdown("<h3 style='margin:0 0 15px 0; padding:0; color:#31333F; text-align:center;'>Visualizer Studio</h3>", unsafe_allow_html=True)
+        st.markdown("<h3 style='margin:0 0 15px 35px; padding:0; color:#31333F;'>Visualizer Studio</h3>", unsafe_allow_html=True)
         
         if st.session_state.get("image") is not None:
             if st.button("🔄 Reset Project / Clear All", use_container_width=True):
