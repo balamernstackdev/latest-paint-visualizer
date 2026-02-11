@@ -120,6 +120,40 @@
     let globalLastTapTime = 0;
     const DBL_TAP_WINDOW = 250; // Reduced from 350ms for more precise detection
 
+    // --- THROTTLE HISTORY UPDATES TO PREVENT "Bad message format" ERROR ---
+    // Browser limit: 100 pushState calls per 10 seconds
+    // We throttle to 80/10s (8/s) for safety
+    let historyCallTimes = [];
+    const MAX_HISTORY_CALLS = 80; // Per 10 seconds
+    const HISTORY_WINDOW = 10000; // 10 seconds
+    const MIN_HISTORY_INTERVAL = 125; // Minimum 125ms between calls (8 per second)
+    let lastHistoryCall = 0;
+
+    const throttledPushState = (url) => {
+        const now = Date.now();
+
+        // Remove calls older than 10 seconds
+        historyCallTimes = historyCallTimes.filter(t => (now - t) < HISTORY_WINDOW);
+
+        // Check if we've hit the limit
+        if (historyCallTimes.length >= MAX_HISTORY_CALLS) {
+            console.warn('[Throttle] History pushState limit reached, skipping update');
+            return false;
+        }
+
+        // Check minimum interval
+        if (now - lastHistoryCall < MIN_HISTORY_INTERVAL) {
+            console.warn('[Throttle] Too soon since last pushState, skipping');
+            return false;
+        }
+
+        // Safe to call
+        parent.history.pushState({}, '', url.toString());
+        historyCallTimes.push(now);
+        lastHistoryCall = now;
+        return true;
+    };
+
     /**
      * Setup pointer event proxying for precise interaction
      */
@@ -169,15 +203,17 @@
                 const updateTap = (x, y) => {
                     const currentUrl = new URL(parent.location.href);
                     currentUrl.searchParams.set('tap', `${Math.round(x)},${Math.round(y)}`);
-                    parent.history.pushState({}, '', currentUrl.toString());
-                    triggerRerun();
+                    if (throttledPushState(currentUrl)) {
+                        triggerRerun();
+                    }
                 };
 
                 const updatePan = (px, py) => {
                     const currentUrl = new URL(parent.location.href);
                     currentUrl.searchParams.set('pan_update', `${px.toFixed(4)},${py.toFixed(4)}`);
-                    parent.history.pushState({}, '', currentUrl.toString());
-                    triggerRerun();
+                    if (throttledPushState(currentUrl)) {
+                        triggerRerun();
+                    }
                 };
 
                 const updatePolyPts = (pts) => {
@@ -189,7 +225,7 @@
                         const ptsStr = pts.map(p => `${Math.round(p.x)},${Math.round(p.y)}`).join(";");
                         const currentUrl = new URL(parent.location.href);
                         currentUrl.searchParams.set('poly_pts', ptsStr);
-                        parent.history.pushState({}, '', currentUrl.toString());
+                        throttledPushState(currentUrl);
                         // triggerRerun(); // REMOVED: Don't rerun on every click
                     }
                 };
@@ -284,8 +320,9 @@
                                     const currentUrl = new URL(parent.location.href);
                                     currentUrl.searchParams.set('poly_pts', ptsStr);
                                     currentUrl.searchParams.set('force_finish', 'true');
-                                    parent.history.pushState({}, '', currentUrl.toString());
-                                    triggerRerun();
+                                    if (throttledPushState(currentUrl)) {
+                                        triggerRerun();
+                                    }
                                 }
                             } else {
                                 // Single click: Just add point
