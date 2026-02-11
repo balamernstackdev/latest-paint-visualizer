@@ -1,5 +1,6 @@
 import streamlit as st
 import numpy as np
+import cv2
 from utils.performance import cleanup_session_caches, should_trigger_cleanup
 
 def initialize_session_state():
@@ -50,12 +51,19 @@ def cb_apply_pending():
             'finish': st.session_state.get("selection_finish", 'Standard')
         })
         
+        # DEBUG: Track operation state
+        current_op = st.session_state.get("selection_op")
+        num_masks = len(st.session_state["masks"])
+        print(f"DEBUG: cb_apply_pending -> Operation: {current_op}, Existing masks: {num_masks}")
+        
         # Handle Subtraction Logic
-        if st.session_state.get("selection_op") == "Subtract" and st.session_state["masks"]:
+        if current_op == "Subtract" and st.session_state["masks"]:
             # Target the selected layer if valid, otherwise the last one
             target_idx = st.session_state.get("selected_layer_idx")
             if target_idx is None or not (0 <= target_idx < len(st.session_state["masks"])):
                 target_idx = len(st.session_state["masks"]) - 1
+            
+            print(f"DEBUG: SUBTRACT mode -> Target layer index: {target_idx}")
             
             # Perform logical subtraction
             # Ensure masks are the same shape before bitwise operation
@@ -66,8 +74,15 @@ def cb_apply_pending():
             if target_mask.shape != new_selection_mask.shape:
                 new_selection_mask = cv2.resize(new_selection_mask.astype(np.uint8), (target_mask.shape[1], target_mask.shape[0]), interpolation=cv2.INTER_NEAREST) > 0
             
+            # Count pixels before and after
+            before_count = np.sum(target_mask)
             st.session_state["masks"][target_idx]['mask'] = target_mask & ~new_selection_mask
+            after_count = np.sum(st.session_state["masks"][target_idx]['mask'])
+            removed_count = before_count - after_count
+            
+            print(f"DEBUG: Subtraction applied -> Removed {removed_count} pixels from layer {target_idx}")
         else:
+            print(f"DEBUG: ADD mode -> Creating new layer")
             st.session_state["masks"].append(new_mask)
             
         st.session_state["masks_redo"] = [] # Clear redo stack on new action
@@ -76,6 +91,7 @@ def cb_apply_pending():
         st.session_state["render_id"] += 1
         st.session_state["canvas_id"] = st.session_state.get("canvas_id", 0) + 1  # Re-enabled to clear box on apply
         st.session_state["canvas_raw"] = {} # Force clear cached objects
+
 
 def cb_cancel_pending():
     st.session_state["pending_selection"] = None

@@ -203,9 +203,22 @@
                 const updateTap = (x, y) => {
                     const currentUrl = new URL(parent.location.href);
                     currentUrl.searchParams.set('tap', `${Math.round(x)},${Math.round(y)}`);
-                    if (throttledPushState(currentUrl)) {
-                        triggerRerun();
+
+                    // Store tap in window for Python to read
+                    window.parent.LAST_TAP_COORDS = { x: Math.round(x), y: Math.round(y), timestamp: Date.now() };
+
+                    // Try throttled pushState first
+                    const pushed = throttledPushState(currentUrl);
+
+                    if (!pushed) {
+                        // Throttled! Use replaceState instead (doesn't count toward limit)
+                        // This updates the URL without adding to history
+                        console.log('[Tap] Using replaceState due to throttle');
+                        parent.history.replaceState({}, '', currentUrl.toString());
                     }
+
+                    // Always trigger rerun for taps
+                    triggerRerun();
                 };
 
                 const updatePan = (px, py) => {

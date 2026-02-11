@@ -253,6 +253,7 @@ def setup_styles():
             z-index: 9999999 !important;
             background-color: transparent !important;
             border: none !important;
+            pointer-events: auto !important;
         }}
 
         /* 📱 MOBILE OPTIMIZATIONS */
@@ -284,21 +285,47 @@ def setup_styles():
             [data-testid="stHorizontalBlock"] {{
                 gap: 5px !important;
             }}
+
+            /* CRITICAL: Sidebar toggle button must be large enough for mobile touch */
+            [data-testid="stSidebarCollapseButton"] {{
+                min-width: 44px !important;
+                min-height: 44px !important;
+                padding: 12px !important;
+                background-color: rgba(255, 255, 255, 0.95) !important;
+                border-radius: 8px !important;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.15) !important;
+                z-index: 999999999 !important;
+                pointer-events: auto !important;
+                touch-action: manipulation !important;
+            }}
+
+            [data-testid="stSidebarCollapseButton"]:active {{
+                background-color: rgba(0,0,0,0.1) !important;
+                transform: scale(0.95);
+            }}
+
+            [data-testid="stSidebarCollapseButton"] svg {{
+                width: 20px !important;
+                height: 20px !important;
+            }}
         }}
         
-        /* When sidebar is OPEN, move the close button to the left corner */
+        /* When sidebar is OPEN, move the close button to the RIGHT side */
         [data-testid="stSidebar"] [data-testid="stSidebarCollapseButton"] {{
-            position: absolute !important;
+            position: fixed !important;
+            top: 10px !important;
+            left: auto !important;
+            right: 10px !important;
+            z-index: 999999999 !important;
+        }}
+
+        /* When sidebar is CLOSED, ensure the open button is at the top left */
+        [data-testid="stHeader"] [data-testid="stSidebarCollapseButton"] {{
+            position: fixed !important;
             top: 10px !important;
             left: 10px !important;
             right: auto !important;
-        }}
-
-        /* When sidebar is CLOSED, ensure the open button is at the top left header */
-        [data-testid="stHeader"] [data-testid="stSidebarCollapseButton"] {{
-            position: absolute !important;
-            top: 10px !important;
-            left: 10px !important;
+            z-index: 999999999 !important;
         }}
 
         [data-testid="stSidebarCollapseButton"] svg {{
@@ -310,6 +337,7 @@ def setup_styles():
 
         header[data-testid="stHeader"] {{
             background: transparent !important;
+            z-index: 1000 !important;
         }}
 
         /* HIDE CUSTOM BUTTON WRAPPERS */
@@ -374,6 +402,12 @@ def setup_styles():
             [data-testid="stSidebar"] {{
                 background-color: #ffffff !important;
                 border-right: 1px solid #e5e7eb !important;
+                z-index: 999999998 !important;
+            }}
+
+            /* Ensure sidebar overlay works on mobile */
+            [data-testid="stSidebarUserContent"] {{
+                pointer-events: auto !important;
             }}
         }}
 
@@ -397,16 +431,11 @@ def setup_styles():
             visibility: visible !important;
             opacity: 1 !important;
             z-index: 999999999 !important;
-            position: absolute !important;
-            top: 15px !important;
-            left: 15px !important;
+            position: fixed !important;
+            align-items: center !important;
+            justify-content: center !important;
         }}
 
-        /* Exception: Close button on sidebar (right) */
-        [data-testid="stSidebar"] [data-testid="stSidebarCollapseButton"] {{
-            left: auto !important;
-            right: 15px !important;
-        }}
 
         /* HIDE UI NOISE */
         [data-testid="stDecoration"], 
@@ -652,7 +681,7 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
     sam = get_sam_engine(CHECKPOINT_PATH, MODEL_TYPE)
 
     # --- 🎯 MOBILE INTERACTION HANDLER ---
-    if mobile_tap and mobile_tap.strip() != "":
+    if mobile_tap and mobile_tap.strip() != "" and not skip_processing:
         try:
             parts = mobile_tap.split(",")
             if len(parts) >= 2:
@@ -670,22 +699,39 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                 if click_state_key != st.session_state.get("last_mobile_tap"):
                     st.session_state["last_mobile_tap"] = click_state_key
                     
-                    if not is_poly: # Standard point selection
-                        if not getattr(sam, "is_image_set", False): sam.set_image(st.session_state["image"])
-                        mask = sam.generate_mask(point_coords=[real_x, real_y], level=st.session_state.get("mask_level", 0), is_wall_only=st.session_state.get("is_wall_only", False))
+                    if not is_poly: # Standard point selection (AI Click, AI Object, etc.)
+                        if not getattr(sam, "is_image_set", False): 
+                            sam.set_image(st.session_state["image"])
+                        
+                        mask = sam.generate_mask(
+                            point_coords=[real_x, real_y], 
+                            level=st.session_state.get("mask_level", 0), 
+                            is_wall_only=st.session_state.get("is_wall_only", False)
+                        )
+                        
                         if mask is not None:
                             st.session_state["pending_selection"] = {'mask': mask, 'point': (real_x, real_y)}
+                            
+                            # CRITICAL: Apply paint immediately on mobile
                             cb_apply_pending()
+                            
                             st.session_state["render_id"] += 1
                             st.session_state["canvas_id"] = st.session_state.get("canvas_id", 0) + 1
-                            # st.query_params.pop already triggers an app rerun
+                            
+                            # Clear the tap parameter
                             st.query_params.pop("tap", None)
+                            
+                            # CRITICAL FIX: Explicitly trigger rerun to show the painted result
+                            print(f"DEBUG: Paint applied for mobile tap at ({real_x},{real_y}), triggering rerun")
+                            safe_rerun()
                     else:
                         st.session_state["render_id"] += 1
                         st.query_params.pop("tap", None)
                         # safe_rerun() # Fragment scope is enough for poly pts
         except Exception as e:
             print(f"ERROR in mobile tap: {e}")
+            import traceback
+            traceback.print_exc()
 
     if mobile_pan and mobile_pan.strip() != "":
         try:
@@ -789,6 +835,10 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                                     scaled_path.append(scaled_cmd)
                             mask = process_lasso_path(scaled_path, w, h, thickness=st.session_state.get("lasso_thickness", 6))
                             if mask.any():
+                                # DEBUG: Log operation mode before applying
+                                current_op = st.session_state.get("selection_op", "Unknown")
+                                print(f"DEBUG: FREEHAND LASSO APPLY -> Operation: {current_op}, Mask pixels: {np.sum(mask)}")
+                                
                                 st.session_state["pending_selection"] = {'mask': mask}
                                 cb_apply_pending()
                                 st.session_state["render_id"] += 1
@@ -899,6 +949,10 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                             cv2.fillPoly(mask, [np.array(pts, np.int32)], 255)
                             final_mask = mask > 0
                             if final_mask.any():
+                                # DEBUG: Log operation mode before applying
+                                current_op = st.session_state.get("selection_op", "Unknown")
+                                print(f"DEBUG: POLYGONAL LASSO APPLY -> Operation: {current_op}, Mask pixels: {np.sum(final_mask)}")
+                                
                                 st.session_state["pending_selection"] = {'mask': final_mask}
                                 cb_apply_pending() 
                                 st.session_state["canvas_id"] = st.session_state.get("canvas_id", 0) + 1
@@ -966,13 +1020,13 @@ def render_visualizer_engine_v11(display_width):
     st.markdown('<div class="mobile-zoom-wrapper" style="margin-top: 10px;"></div>', unsafe_allow_html=True)
     render_zoom_controls(key_suffix="mobile", context_class="mobile-zoom-wrapper")
     
-    # 🧪 LASSO TUNING (Contextual)
-    if "Lasso" in tool_mode or "Polygonal" in tool_mode:
-        st.markdown('<div class="mobile-brush-tuning" data-desktop-hide="true" style="margin: 10px 0;">', unsafe_allow_html=True)
-        t_col1, t_col2 = st.columns([0.3, 0.7], vertical_alignment="center")
-        with t_col1: st.markdown("**Size** 🖌️")
-        with t_col2: st.slider("Thickness", 1, 50, st.session_state.get("lasso_thickness", 6), key="lasso_thickness", label_visibility="collapsed")
-        st.markdown('</div>', unsafe_allow_html=True)
+    # 🧪 LASSO TUNING (Contextual) - HIDDEN per user request
+    # if "Lasso" in tool_mode or "Polygonal" in tool_mode:
+    #     st.markdown('<div class="mobile-brush-tuning" data-desktop-hide="true" style="margin: 10px 0;">', unsafe_allow_html=True)
+    #     t_col1, t_col2 = st.columns([0.3, 0.7], vertical_alignment="center")
+    #     with t_col1: st.markdown("**Size** 🖌️")
+    #     with t_col2: st.slider("Thickness", 1, 50, st.session_state.get("lasso_thickness", 6), key="lasso_thickness", label_visibility="collapsed")
+    #     st.markdown('</div>', unsafe_allow_html=True)
     if st.session_state.get("pending_selection") is not None:
         st.markdown('<div class="mobile-bottom-actions">', unsafe_allow_html=True)
         b_col1, b_col2, b_col3 = st.columns([1, 0.2, 1], gap="small", vertical_alignment="center")
@@ -1144,10 +1198,8 @@ def render_sidebar(sam, device_str):
             except ValueError:
                 tool_idx = 0
 
-            # 🛡️ CRITICAL FIX: Force-sync radio widget key to match master state
-            # Streamlit widgets use their key value over the index parameter,
-            # so if sidebar_tool_radio != selection_tool, the radio will revert!
-            st.session_state["sidebar_tool_radio"] = current_tool
+            # Use index parameter directly - don't set via session state before widget creation
+            # This prevents Streamlit's "default value + Session State API" warning
             
             st.radio("Method", tool_options, 
                                     index=tool_idx, 
