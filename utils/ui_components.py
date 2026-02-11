@@ -1123,7 +1123,7 @@ def render_sidebar(sam, device_str):
 
             if "AI Object" in current_tool:
                 st.session_state["ai_drag_sub_tool"] = st.radio("Action", ["🆕 Draw New", "🖱️ Move"], index=0 if st.session_state.get("ai_drag_sub_tool") == "🆕 Draw New" else 1, horizontal=True)
-                st.session_state["snap_to_edges"] = st.toggle("Snap to Edges 🔍", value=st.session_state.get("snap_to_edges", False), help="Attempts to automatically align your box to nearby architectural lines.")
+                # st.session_state["snap_to_edges"] = st.toggle("Snap to Edges 🔍", value=st.session_state.get("snap_to_edges", False), help="Attempts to automatically align your box to nearby architectural lines.")
             
             if "Polygonal" in current_tool:
                 # Use columns for buttons, but now they have full sidebar width to split
@@ -1207,8 +1207,9 @@ def render_sidebar(sam, device_str):
                         with r4: st.button("🗑️", key=f"sidebar_del_{i}", on_click=cb_delete_layer, args=(i,))
                         
                         # Real-time Refinement Slider
-                        new_ref = st.slider("Expansion / Contraction", -10, 10, int(mask_data.get('refinement', 0)), key=f"refine_{i}")
-                        if new_ref != mask_data.get('refinement'):
-                            mask_data['refinement'] = new_ref
-                            st.session_state["render_id"] += 1
+                        # HIDDEN: User requested to hide refinement (Step 2281)
+                        # new_ref = st.slider("Expansion / Contraction", -10, 10, int(mask_data.get('refinement', 0)), key=f"refine_{i}")
+                        # if new_ref != mask_data.get('refinement'):
+                        #     mask_data['refinement'] = new_ref
+                        #     st.session_state["render_id"] += 1
             else: st.caption("No active layers.")
