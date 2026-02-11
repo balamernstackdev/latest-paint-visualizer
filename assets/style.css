@@ -314,14 +314,14 @@ header {
 
 /* Position the 'Open' button (when sidebar closed) */
 header [data-testid="stSidebarCollapseButton"] {
-    top: 5px !important;
-    left: 5px !important;
+    top: 8px !important;
+    left: 8px !important;
 }
 
 /* Position the 'Close' button (when sidebar open) */
 [data-testid="stSidebar"] [data-testid="stSidebarCollapseButton"] {
-    top: 5px !important;
-    right: 5px !important;
+    top: 8px !important;
+    right: 8px !important;
     left: auto !important;
 }
 

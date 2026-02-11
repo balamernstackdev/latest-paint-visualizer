@@ -755,7 +755,13 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
 
     # --- 3. PERSIST DRAWING & UNFINISHED POLYGON ---
     initial_drawing = {"version": "4.4.0", "objects": []}
-    if st.session_state.get("canvas_raw"):
+    
+    # Check if we just finished a polygon (to prevent ghost persistence)
+    was_just_finished = st.session_state.get("just_finished_poly", False)
+    # Reset for next run
+    st.session_state["just_finished_poly"] = False
+
+    if st.session_state.get("canvas_raw") and not was_just_finished:
         for obj in (st.session_state.get("canvas_raw") or {}).get("objects", []):
             if obj.get("type") in ["path", "polygon"]:
                 initial_drawing["objects"].append(obj)
@@ -881,6 +887,8 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                     if "force_finish" in st.query_params:
                         force_finish_url = st.query_params.get("force_finish") == "true"
                         st.query_params.pop("force_finish")
+                        # 🏁 STORE PERSISTENTLY FOR UI CLEANUP logic later in script
+                        st.session_state["just_finished_poly"] = True
                         print(f"DEBUG: Cleared force_finish from URL (value was: {force_finish_url})")
                     
                     # Capture force finish from session state
@@ -959,7 +967,17 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                                 st.session_state["render_id"] += 1
                                 if "poly_pts" in st.query_params:
                                     st.query_params.pop("poly_pts", None)
+                                if "force_finish" in st.query_params:
+                                    st.query_params.pop("force_finish", None)
+                                
+                                # Clear local storage too
                                 components.html("<script>window.parent.STREAMLIT_POLY_POINTS = [];</script>", height=0)
+                                safe_rerun()
+                            else:
+                                if force_finish: print(f"DEBUG: Skipping Poly Apply - Not enough points ({len(pts)})")
+                                if "force_finish" in st.query_params: st.query_params.pop("force_finish", None)
+                                if "poly_pts" in st.query_params: st.query_params.pop("poly_pts", None)
+                                safe_rerun()
                 except Exception as e: logging.error(f"Poly Error: {e}")
                 
             # --- FINAL SIGNAL CLEANUP ---
@@ -1089,7 +1107,7 @@ def render_sidebar(sam, device_str):
         # --- Native Sidebar Logic handles close ---
         pass
 
-        st.markdown("<h3 style='margin:0 0 15px 35px; padding:0; color:#31333F;'>Visualizer Studio</h3>", unsafe_allow_html=True)
+        st.markdown("<h3 style='margin:0 0 15px 0; padding:0; color:#31333F; text-align:center;'>Visualizer Studio</h3>", unsafe_allow_html=True)
         
         if st.session_state.get("image") is not None:
             if st.button("🔄 Reset Project / Clear All", use_container_width=True):

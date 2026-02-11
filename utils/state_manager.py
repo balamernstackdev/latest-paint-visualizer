@@ -81,6 +81,10 @@ def cb_apply_pending():
             removed_count = before_count - after_count
             
             print(f"DEBUG: Subtraction applied -> Removed {removed_count} pixels from layer {target_idx}")
+            
+            # --- USER FEEDBACK: Warning if nothing happened ---
+            if removed_count == 0:
+                st.toast("⚠️ No overlap! Subtraction only works if you select over an existing painted area.", icon="ℹ️")
         else:
             print(f"DEBUG: ADD mode -> Creating new layer")
             st.session_state["masks"].append(new_mask)

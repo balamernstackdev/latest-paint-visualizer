@@ -82,15 +82,16 @@
 
             let containerWidth = container.getBoundingClientRect().width;
 
-            // On mobile, force full available width regardless of container quirks
+            // On mobile, force better fit within Streamlit's default padding
             if (parent.window.innerWidth < 1024) {
-                containerWidth = parent.window.innerWidth - 24;
+                // Streamlit usually has ~16px padding on mobile
+                containerWidth = Math.min(containerWidth, parent.window.innerWidth - 16);
             }
 
             if (containerWidth <= 0) return;
 
-            // Standardize scaling
-            const scale = Math.min(1.0, (containerWidth - 2) / CANVAS_WIDTH);
+            // Standardize scaling - remove the -2 offset for better fit
+            const scale = Math.min(1.0, containerWidth / CANVAS_WIDTH);
 
             // Apply wrapper styles (Visual size)
             wrapper.style.width = (CANVAS_WIDTH * scale) + "px";
@@ -99,11 +100,12 @@
             wrapper.style.touchAction = "none";
             wrapper.style.position = "relative";
             wrapper.style.margin = "0 auto";
+            wrapper.style.border = "none"; // Ensure no borders cause offset
 
             // Apply iframe styles with transform scaling
             iframe.style.width = CANVAS_WIDTH + "px";
             iframe.style.height = CANVAS_HEIGHT + "px";
-            iframe.style.transformOrigin = "0 0";
+            iframe.style.transformOrigin = "top left"; // Explicitly top left
             iframe.style.transform = "scale(" + scale + ")";
             iframe.style.border = "none";
             iframe.style.display = "block";
@@ -122,11 +124,11 @@
 
     // --- THROTTLE HISTORY UPDATES TO PREVENT "Bad message format" ERROR ---
     // Browser limit: 100 pushState calls per 10 seconds
-    // We throttle to 80/10s (8/s) for safety
+    // We throttle to 50/10s (5/s) for safety
     let historyCallTimes = [];
-    const MAX_HISTORY_CALLS = 80; // Per 10 seconds
+    const MAX_HISTORY_CALLS = 50; // Per 10 seconds
     const HISTORY_WINDOW = 10000; // 10 seconds
-    const MIN_HISTORY_INTERVAL = 125; // Minimum 125ms between calls (8 per second)
+    const MIN_HISTORY_INTERVAL = 200; // Minimum 200ms between calls (5 per second)
     let lastHistoryCall = 0;
 
     const throttledPushState = (url) => {
@@ -235,22 +237,29 @@
                 const updatePan = (px, py) => {
                     const currentUrl = new URL(parent.location.href);
                     currentUrl.searchParams.set('pan_update', `${px.toFixed(4)},${py.toFixed(4)}`);
-                    if (throttledPushState(currentUrl)) {
-                        triggerRerun();
+
+                    const pushed = throttledPushState(currentUrl);
+                    if (!pushed) {
+                        // Fallback to replaceState if pushState is throttled
+                        parent.history.replaceState({}, '', currentUrl.toString());
                     }
+
+                    // Always trigger rerun for panning to maintain responsiveness
+                    triggerRerun();
                 };
 
                 const updatePolyPts = (pts) => {
                     if (canvas.dataset.drawingMode !== "polygon") return;
                     window.parent.STREAMLIT_POLY_POINTS = pts;
-                    // Store points locally but DON'T trigger rerun on every click
-                    // Only sync to URL when FINISH button is clicked
+
                     if (pts && pts.length > 0) {
                         const ptsStr = pts.map(p => `${Math.round(p.x)},${Math.round(p.y)}`).join(";");
                         const currentUrl = new URL(parent.location.href);
                         currentUrl.searchParams.set('poly_pts', ptsStr);
-                        throttledPushState(currentUrl);
-                        // triggerRerun(); // REMOVED: Don't rerun on every click
+
+                        // IMPORTANT: Use replaceState for point updates to avoid history limit
+                        // This updates the URL so Python can see it, but doesn't count against pushState limit
+                        parent.history.replaceState({}, '', currentUrl.toString());
                     }
                 };
 
