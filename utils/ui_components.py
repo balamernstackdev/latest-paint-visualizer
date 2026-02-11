@@ -319,6 +319,7 @@ def setup_styles():
     #                 }
     #             }
     #         }
+    
     #     }, true);
         
     #     // AGGRESSIVE: Monitor every 50ms and force reopen unless user explicitly closed
@@ -374,7 +375,7 @@ def render_zoom_controls(key_suffix="", context_class=""):
     if context_class:
         st.markdown(f'<div class="{context_class}">', unsafe_allow_html=True)
 
-    z_col2, z_col3, z_col4 = st.columns([1, 2, 1])
+    z_col2, z_col3, z_col4 = st.columns([1, 1, 1])
     
     def update_zoom(delta):
         st.session_state["zoom_level"] = max(1.0, min(4.0, st.session_state["zoom_level"] + delta))
@@ -440,13 +441,29 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
     mobile_pan = query_params.get("pan_update", "")
     mobile_zoom = query_params.get("zoom_update", "")
     url_pts_raw = query_params.get("poly_pts", "")
-    
+    force_finish_raw = query_params.get("force_finish", "")
+
+    # Signal ID Handling: Normalize signals to extract timestamp if present
+    def extract_signal(raw_str):
+        if not raw_str or (isinstance(raw_str, str) and raw_str.strip() == ""): return None, None
+        if isinstance(raw_str, list): raw_str = raw_str[0]
+        parts = raw_str.split(",")
+        
+        # If the last part looks like a timestamp (lengthy digit string)
+        if len(parts) >= 2:
+            last_part = parts[-1].strip()
+            if len(last_part) >= 10 and last_part.isdigit():
+                return ",".join(parts[:-1]), last_part
+        return raw_str, None
+
+    mobile_tap, tap_sid = extract_signal(mobile_tap)
+    mobile_pan, pan_sid = extract_signal(mobile_pan)
+    force_finish, finish_sid = extract_signal(force_finish_raw)
+    is_finish = (force_finish == "true") or st.session_state.get("force_finish_poly", False)
+
     # SILENT LOOP BREAKER: Guard against rapid successive fragment reruns
     is_guarded = st.session_state.get("loop_guarded", False)
     has_interaction = any([mobile_tap, mobile_pan, mobile_zoom, url_pts_raw])
-    
-    # Priority: ALWAYS process FINISH commands even if guarded
-    is_finish = st.session_state.get("force_finish_poly", False)
     
     # Skip heavy signal processing if guarded, but DO NOT return (renders canvas)
     # UNLESS it is a finish command which is high priority
@@ -478,16 +495,23 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
 
     # --- 🎯 MOBILE INTERACTION HANDLER ---
     if mobile_tap and mobile_tap.strip() != "" and not skip_processing:
-        try:
-            parts = mobile_tap.split(",")
-            if len(parts) >= 2:
-                x, y = int(parts[0].strip()), int(parts[1].strip())
-                real_x = int(x / scale_factor) + start_x
-                real_y = int(y / scale_factor) + start_y
-                
-                print(f"DEBUG: Mobile Tap Handler -> x:{x}, y:{y}, Tool:{drawing_mode}, Scale:{scale_factor:.4f}")
-                # Check for tool-specific behavior
-                is_poly = drawing_mode == "polygon"
+        # SIGNAL GUARD: Ensure we only process this specific tap ONCE
+        if tap_sid and tap_sid == st.session_state.get("last_tap_sid"):
+            mobile_tap = None # Already processed
+        else:
+            if tap_sid: st.session_state["last_tap_sid"] = tap_sid
+
+        if mobile_tap:
+            try:
+                parts = mobile_tap.split(",")
+                if len(parts) >= 2:
+                    x, y = int(parts[0].strip()), int(parts[1].strip())
+                    real_x = int(x / scale_factor) + start_x
+                    real_y = int(y / scale_factor) + start_y
+                    
+                    print(f"DEBUG: Mobile Tap Handler -> x:{x}, y:{y}, Tool:{drawing_mode}, Scale:{scale_factor:.4f}")
+                    # Check for tool-specific behavior
+                    is_poly = drawing_mode == "polygon"
                 
                 picked_color = st.session_state.get('picked_color', '#3B82F6')
                 click_state_key = f"{real_x}_{real_y}_{picked_color}_{drawing_mode}"
@@ -495,7 +519,11 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                 if click_state_key != st.session_state.get("last_mobile_tap"):
                     st.session_state["last_mobile_tap"] = click_state_key
                     
-                    if not is_poly: # Standard point selection (AI Click, AI Object, etc.)
+                    # 🎯 TOOL SEPARATION: Skip point-tap logic for Polygon, Rect, and Transform
+                    # For these tools, interactions are processed via objects/poly_pts
+                    is_direct_tap_tool = drawing_mode not in ["polygon", "rect", "transform"]
+                    
+                    if is_direct_tap_tool: # Standard point selection (AI Click, etc.)
                         if not getattr(sam, "is_image_set", False): 
                             sam.set_image(st.session_state["image"])
                         
@@ -524,21 +552,28 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                         st.session_state["render_id"] += 1
                         st.query_params.pop("tap", None)
                         # safe_rerun() # Fragment scope is enough for poly pts
-        except Exception as e:
-            print(f"ERROR in mobile tap: {e}")
-            import traceback
-            traceback.print_exc()
+            except Exception as e:
+                print(f"ERROR in mobile tap: {e}")
+                import traceback
+                traceback.print_exc()
 
     if mobile_pan and mobile_pan.strip() != "":
-        try:
-            parts = mobile_pan.split(",")
-            if len(parts) >= 2:
-                px, py = float(parts[0]), float(parts[1])
-                st.session_state["pan_x"], st.session_state["pan_y"] = max(0.0, min(1.0, px)), max(0.0, min(1.0, py))
-                st.session_state["render_id"] += 1
-            
-            st.query_params.pop("pan_update", None)
-        except: pass
+        # SIGNAL GUARD: Ensure we only process this specific pan ONCE
+        if pan_sid and pan_sid == st.session_state.get("last_pan_sid"):
+            mobile_pan = None # Already processed
+        else:
+            if pan_sid: st.session_state["last_pan_sid"] = pan_sid
+
+        if mobile_pan:
+            try:
+                parts = mobile_pan.split(",")
+                if len(parts) >= 2:
+                    px, py = float(parts[0]), float(parts[1])
+                    st.session_state["pan_x"], st.session_state["pan_y"] = max(0.0, min(1.0, px)), max(0.0, min(1.0, py))
+                    st.session_state["render_id"] += 1
+                
+                st.query_params.pop("pan_update", None)
+            except: pass
 
     if mobile_zoom and mobile_zoom.strip() != "":
         try:
@@ -635,11 +670,14 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                                         scaled_cmd.append(int(cmd[i] / scale_factor) + start_x)
                                         scaled_cmd.append(int(cmd[i+1] / scale_factor) + start_y)
                                     scaled_path.append(scaled_cmd)
-                            mask = process_lasso_path(scaled_path, w, h, thickness=st.session_state.get("lasso_thickness", 6))
+                            # 🎨 FILL SELECTION MODE (Non-AI)
+                            is_fill_mode = st.session_state.get("fill_selection", False)
+                            mask = process_lasso_path(scaled_path, w, h, thickness=st.session_state.get("lasso_thickness", 6), fill=is_fill_mode)
+                            
                             if mask.any():
                                 # DEBUG: Log operation mode before applying
                                 current_op = st.session_state.get("selection_op", "Unknown")
-                                print(f"DEBUG: FREEHAND LASSO APPLY -> Operation: {current_op}, Mask pixels: {np.sum(mask)}")
+                                print(f"DEBUG: FREEHAND LASSO APPLY -> Operation: {current_op}, Mask pixels: {np.sum(mask)}, Fill: {is_fill_mode}")
                                 
                                 st.session_state["pending_selection"] = {'mask': mask}
                                 cb_apply_pending()
@@ -662,12 +700,26 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                 if current_boxes != st.session_state.get("pending_boxes") and current_boxes:
                     st.session_state["pending_boxes"] = current_boxes
                     for box in current_boxes:
+                        # 🛡️ INVALID BOX GUARD: Ignore empty or tech signals at 0,0
+                        box_w, box_h = abs(box[2] - box[0]), abs(box[3] - box[1])
+                        if box_w < 5 or box_h < 5: continue 
+                        if box[0] == 0 and box[1] == 0: continue
+
                         final_box = box
                         if st.session_state.get("snap_to_edges", False): final_box = snap_box_to_edges(st.session_state["image"], box)
                         h_img, w_img = st.session_state["image"].shape[:2]
                         final_box = [max(0, min(w_img, final_box[0])), max(0, min(h_img, final_box[1])), max(0, min(w_img, final_box[2])), max(0, min(h_img, final_box[3]))]
-                        sam.set_image(st.session_state["image"])
-                        mask = sam.generate_mask(box_coords=final_box, level=st.session_state.get("mask_level", 0), is_wall_only=st.session_state.get("is_wall_only", False))
+                        
+                        # 🎨 FILL SELECTION MODE (Non-AI)
+                        if st.session_state.get("fill_selection", False):
+                            # Create a simple rectangular mask
+                            mask = np.zeros((h_img, w_img), dtype=np.bool_)
+                            mask[final_box[1]:final_box[3], final_box[0]:final_box[2]] = True
+                        else:
+                            # Standard AI Mode
+                            sam.set_image(st.session_state["image"])
+                            mask = sam.generate_mask(box_coords=final_box, level=st.session_state.get("mask_level", 0), is_wall_only=st.session_state.get("is_wall_only", False))
+                        
                         if mask is not None: combined_mask = mask.copy() if combined_mask is None else combined_mask | mask
                     
                     if combined_mask is not None:
@@ -678,37 +730,27 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
 
             elif "Polygonal Lasso" in tool_mode:
                 try:
-                    # DEFENSIVE: Clear force_finish immediately if it exists
-                    force_finish_url = False
-                    if "force_finish" in st.query_params:
-                        ff_val = str(st.query_params.get("force_finish")).lower()
-                        force_finish_url = ff_val in ["true", "1", "yes"]
-                        st.query_params.pop("force_finish")
-                        # 🏁 STORE PERSISTENTLY FOR UI CLEANUP logic later in script
+                    # Capture force finish from global parser (unifies signals)
+                    if is_finish:
                         st.session_state["just_finished_poly"] = True
-                        print(f"DEBUG: Cleared force_finish from URL (parsed: {force_finish_url})")
-                    
-                    # Capture force finish from session state
-                    force_finish = st.session_state.get("force_finish_poly", False) or force_finish_url
+                        print(f"DEBUG: Lasso Logic -> is_finish trigger: {is_finish}")
                     
                     url_pts = []
                     if url_pts_raw:
                         try:
                             # 🧩 Robustly handle list or string from Streamlit query params
-                            if isinstance(url_pts_raw, (list, tuple)):
-                                raw_str = str(url_pts_raw[0])
-                            else:
-                                raw_str = str(url_pts_raw)
+                            raw_str = url_pts_raw[0] if isinstance(url_pts_raw, (list, tuple)) else str(url_pts_raw)
                             
                             for p in raw_str.split(";"):
                                 if "," in p:
                                     try:
-                                        px, py = p.split(",")
-                                        # Convert captured canvas-space coords to image-space
+                                        parts = p.split(",")
+                                        # Only take first 2 parts as coordinates (ignore timestamp if appended)
+                                        px, py = parts[0], parts[1]
                                         url_pts.append([int(float(px) / scale_factor) + start_x, int(float(py) / scale_factor) + start_y])
                                     except: pass
-                            if force_finish: print(f"DEBUG: Parsed URL Pts: {len(url_pts)} from '{raw_str[:100]}...'")
-                        except Exception as pe: print(f"DEBUG: Poly Parse Err: {pe} | Raw: '{url_pts_raw}'")
+                            if is_finish: print(f"DEBUG: Parsed URL Pts: {len(url_pts)}")
+                        except Exception as pe: print(f"DEBUG: Poly Parse Err: {pe}")
 
                     target_obj = None
                     for obj in reversed(objects):
@@ -725,6 +767,13 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                     if force_finish: print(f"DEBUG: Lasso Logic -> force_finish: {force_finish}, target_obj: {target_obj.get('type') if target_obj else 'None'}")
                     
                     # 🏁 FINISH TRIGGER - Only trigger on explicit FINISH button click
+                    if force_finish:
+                        # SIGNAL GUARD: Ensure we only process this specific finish ONCE
+                        if finish_sid and finish_sid == st.session_state.get("last_finish_sid"):
+                            force_finish = False # Already processed
+                        else:
+                            if finish_sid: st.session_state["last_finish_sid"] = finish_sid
+
                     if force_finish:
                         # ALWAYS clear the session state signal immediately to prevent loops
                         st.session_state["force_finish_poly"] = False 
@@ -755,13 +804,22 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                                          pts.append([int(cmd[1][0] / scale_factor) + start_x, int(cmd[1][1] / scale_factor) + start_y])
                         
                         if len(pts) > 2:
-                            print(f"DEBUG: APPLY POLYGON -> Points: {len(pts)}, Force Finish: {force_finish}, Tool: {tool_mode}")
-                            mask = np.zeros((h, w), dtype=np.uint8)
-                            cv2.fillPoly(mask, [np.array(pts, np.int32)], 255)
-                            final_mask = mask > 0
-                            if final_mask.any():
-                                current_op = st.session_state.get("selection_op", "Unknown")
-                                print(f"DEBUG: POLYGONAL LASSO APPLY -> Operation: {current_op}, Mask pixels: {np.sum(final_mask)}")
+                            is_fill_mode = st.session_state.get("fill_selection", False)
+                            print(f"DEBUG: APPLY POLYGON -> Points: {len(pts)}, Finish: {is_finish}, Fill: {is_fill_mode}")
+                            
+                            if is_fill_mode:
+                                # 🎨 MANUAL POLYGON FILL
+                                mask = np.zeros((h, w), dtype=np.uint8)
+                                cv2.fillPoly(mask, [np.array(pts, np.int32)], 255)
+                                final_mask = mask > 0
+                            else:
+                                # 🧠 AI SAM MASK (Using polygon as box hint)
+                                sam.set_image(st.session_state["image"])
+                                pts_arr = np.array(pts)
+                                box = [np.min(pts_arr[:,0]), np.min(pts_arr[:,1]), np.max(pts_arr[:,0]), np.max(pts_arr[:,1])]
+                                final_mask = sam.generate_mask(box_coords=box, level=st.session_state.get("mask_level", 1), is_wall_only=st.session_state.get("is_wall_only", False))
+
+                            if final_mask is not None and final_mask.any():
                                 st.session_state["pending_selection"] = {'mask': final_mask}
                                 cb_apply_pending() 
                                 st.session_state["canvas_id"] = st.session_state.get("canvas_id", 0) + 1
@@ -850,7 +908,7 @@ def render_visualizer_engine_v11(display_width):
     #     st.markdown('</div>', unsafe_allow_html=True)
     if st.session_state.get("pending_selection") is not None:
         st.markdown('<div class="mobile-bottom-actions">', unsafe_allow_html=True)
-        b_col1, b_col2, b_col3 = st.columns([1, 0.2, 1], gap="small", vertical_alignment="center")
+        b_col1, b_col2, b_col3 = st.columns([1, 0.4, 1], gap="small", vertical_alignment="center")
         with b_col1: 
             if st.button("✨ APPLY", use_container_width=True, key="mob_apply", type="primary"):
                 cb_apply_pending(); safe_rerun(scope="app")
@@ -1075,6 +1133,12 @@ def render_sidebar(sam, device_str):
                       key="wall_priority_toggle",
                       on_change=lambda: st.session_state.update({"is_wall_only": st.session_state.wall_priority_toggle}),
                       help="**ON (Default):** Stricter borders. Keeps paint on the specific wall face you clicked.\n\n**OFF:** Relaxes borders. Use this if paint is leaving gaps or for furniture/small objects.")
+
+            st.toggle("Fill Entire Selection (Non-AI) 🎨", 
+                      value=st.session_state.get("fill_selection", False), 
+                      key="fill_selection_toggle",
+                      on_change=lambda: st.session_state.update({"fill_selection": st.session_state.fill_selection_toggle}),
+                      help="**ON:** Paints the *entire* inside of your Box or Lasso selection. Best for simple walls or when AI misses details.\n\n**OFF (AI Mode):** Uses AI to intelligently find objects within your marked area.")
 
             if st.session_state.get("pending_selection") is not None or st.session_state.get("pending_boxes"):
                 if st.button("🚫 Clear Selection Draft", use_container_width=True, help="Reset the current selection without applying it."):

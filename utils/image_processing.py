@@ -85,10 +85,12 @@ def composite_image(original_rgb, masks_data):
 
     return result
 
-def process_lasso_path(scaled_path, w, h, thickness=6):
+def process_lasso_path(scaled_path, w, h, thickness=6, fill=False):
     """
     Renders the SVG path from st_canvas into a binary mask.
-    Handles 'M', 'L', 'Q' commands and applies brush thickness.
+    Handles 'M', 'L', 'Q' commands. 
+    If fill=True, ensures the shape is closed and filled (Manual Fill Mode).
+    If fill=False, draws a thick polyline (Brush/AI Mode).
     """
     mask = np.zeros((h, w), dtype=np.uint8)
     points = []
@@ -103,14 +105,12 @@ def process_lasso_path(scaled_path, w, h, thickness=6):
                 points.append([int(cmd[3]), int(cmd[4])])
                 
         if len(points) > 1:
-            # For "Freedraw" (Lasso), we draw a thick polyline
-            # If it's meant to be a closed shape, we use fillPoly
-            # We'll use polylines with thickness as the base
-            cv2.polylines(mask, [np.array(points, np.int32)], isClosed=False, color=255, thickness=max(1, thickness))
-            
-            # If the user closes the shape or we want a filled result:
-            if len(points) > 2:
+            if fill and len(points) > 2:
+                # 🎨 Manual Fill Mode: Solid enclosed shape
                 cv2.fillPoly(mask, [np.array(points, np.int32)], 255)
+            else:
+                # 🧠 Brush/AI Mode: Thick polyline
+                cv2.polylines(mask, [np.array(points, np.int32)], isClosed=False, color=255, thickness=max(1, thickness))
             
     except Exception as e:
         print(f"Lasso Path processing error: {e}")

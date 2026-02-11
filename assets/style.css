@@ -375,3 +375,56 @@ button[key="global_sync_btn"] {
         display: none !important;
     }
 }
+/* Mobile UI Alignment - Prevent Stacking */
+@media (max-width: 768px) {
+    /* Force Apply/Color/Cancel row to stay horizontal */
+    .mobile-bottom-actions > [data-testid="stHorizontalBlock"],
+    .mobile-bottom-actions [data-testid="stHorizontalBlock"] > div {
+        display: flex !important;
+        flex-direction: row !important;
+        flex-wrap: nowrap !important;
+        width: 100% !important;
+        gap: 8px !important;
+    }
+
+    /* Target columns specifically within bottom actions */
+    .mobile-bottom-actions div[data-testid="column"] {
+        flex: 1 1 auto !important;
+        min-width: 0 !important;
+    }
+
+    /* Special case for the tiny color picker column */
+    .mobile-bottom-actions div[data-testid="column"]:nth-child(2) {
+        flex: 0 0 50px !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+    }
+
+    /* Force Zoom row to stay horizontal */
+    .mobile-zoom-wrapper > [data-testid="stHorizontalBlock"],
+    .mobile-zoom-wrapper [data-testid="stHorizontalBlock"] > div {
+        display: flex !important;
+        flex-direction: row !important;
+        flex-wrap: nowrap !important;
+        width: 100% !important;
+        gap: 5px !important;
+        align-items: center !important;
+    }
+
+    .mobile-zoom-wrapper div[data-testid="column"] {
+        flex: 1 1 auto !important;
+        min-width: 0 !important;
+    }
+}
+
+/* Color Picker Mobile Sizing */
+@media (max-width: 640px) {
+    .mobile-bottom-actions [data-testid="stColorPicker"] {
+        padding: 0 !important;
+        margin: 0 !important;
+    }
+    .mobile-bottom-actions [data-testid="stColorPicker"] > label {
+        display: none !important;
+    }
+}

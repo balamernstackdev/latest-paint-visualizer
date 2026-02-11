@@ -142,6 +142,44 @@
     };
 
     /**
+     * Enlarge Fabric.js handles for mobile touch accessibility
+     */
+    function enlargeHandles() {
+        try {
+            const iframe = getActiveIframe();
+            if (!iframe || !iframe.contentWindow) return;
+
+            // Try to find fabric canvas instances
+            const canvases = iframe.contentWindow._canvases || [];
+            if (canvases.length === 0) {
+                // Fallback: Check if it's attached to the window
+                if (iframe.contentWindow.canvas && iframe.contentWindow.canvas.forEachObject) {
+                    canvases.push(iframe.contentWindow.canvas);
+                }
+            }
+
+            canvases.forEach(c => {
+                if (c && c.forEachObject) {
+                    const isMobile = parent.window.innerWidth < 1024;
+                    c.cornerSize = isMobile ? 24 : 12;
+                    c.touchCornerSize = isMobile ? 32 : 16;
+                    c.transparentCorners = false;
+                    c.cornerColor = '#FF4B4B';
+                    c.cornerStyle = 'circle';
+
+                    c.forEachObject(obj => {
+                        obj.cornerSize = c.cornerSize;
+                        obj.touchCornerSize = c.touchCornerSize;
+                        obj.transparentCorners = false;
+                        obj.setCoords(); // Update hit area
+                    });
+                    c.renderAll();
+                }
+            });
+        } catch (e) { }
+    }
+
+    /**
      * Setup pointer event proxying for precise interaction
      */
     function setupInteraction() {
@@ -168,6 +206,7 @@
                 canvas.style.userSelect = "none";
                 canvas.style.webkitUserSelect = "none";
                 canvas.style.webkitTapHighlightColor = "transparent";
+                canvas.oncontextmenu = (e) => e.preventDefault(); // Prevent right-click menu
 
                 let startX = 0, startY = 0;
                 let isDragging = false;
@@ -199,14 +238,18 @@
                 };
 
                 const updateTap = (x, y) => {
+                    // SAFETY: Guard against technical (0,0) ghost signals
+                    if (x === 0 && y === 0) return;
+
                     const currentUrl = new URL(parent.location.href);
-                    currentUrl.searchParams.set('tap', `${Math.round(x)},${Math.round(y)}`);
+                    const signalId = Date.now();
+                    currentUrl.searchParams.set('tap', `${Math.round(x)},${Math.round(y)},${signalId}`);
                     currentUrl.searchParams.delete('force_finish');
                     currentUrl.searchParams.delete('pan_update');
                     currentUrl.searchParams.delete('zoom_update');
 
                     // Store tap in window for Python to read
-                    window.parent.LAST_TAP_COORDS = { x: Math.round(x), y: Math.round(y), timestamp: Date.now() };
+                    window.parent.LAST_TAP_COORDS = { x: Math.round(x), y: Math.round(y), timestamp: signalId };
 
                     // Use throttled replaceState (doesn't count toward history limit)
                     throttledReplaceState(currentUrl);
@@ -217,7 +260,8 @@
 
                 const updatePan = (px, py) => {
                     const currentUrl = new URL(parent.location.href);
-                    currentUrl.searchParams.set('pan_update', `${px.toFixed(4)},${py.toFixed(4)}`);
+                    const signalId = Date.now();
+                    currentUrl.searchParams.set('pan_update', `${px.toFixed(4)},${py.toFixed(4)},${signalId}`);
                     currentUrl.searchParams.delete('force_finish');
                     currentUrl.searchParams.delete('tap');
 
@@ -316,38 +360,21 @@
 
                 // Removed ineffective sync logic from here
 
-                const sendEvent = (type, e) => {
-                    const rect = canvas.getBoundingClientRect();
-                    const scaleX = rect.width > 0 ? (CANVAS_WIDTH / rect.width) : 1;
-                    const scaleY = rect.height > 0 ? (CANVAS_HEIGHT / rect.height) : 1;
-                    const offX = (e.clientX - rect.left) * scaleX;
-                    const offY = (e.clientY - rect.top) * scaleY;
-
-                    canvas.dispatchEvent(new PointerEvent(type, {
-                        bubbles: true, cancelable: true, isPrimary: true, pointerId: 1,
-                        pointerType: e.pointerType || 'mouse',
-                        clientX: e.clientX, clientY: e.clientY,
-                        offsetX: offX, offsetY: offY,
-                        button: 0, buttons: (type === 'pointerup') ? 0 : 1
-                    }));
-                };
+                // Removed ineffective sync logic from here
 
                 // --- 🎯 POINTER LISTENERS (Universal) ---
                 canvas.addEventListener('pointerdown', (e) => {
                     startX = e.clientX; startY = e.clientY;
                     isDragging = false;
-                    sendEvent('pointerdown', e);
                 });
 
                 canvas.addEventListener('pointermove', (e) => {
                     if (Math.abs(e.clientX - startX) > TAP_THRESHOLD || Math.abs(e.clientY - startY) > TAP_THRESHOLD) {
                         isDragging = true;
                     }
-                    sendEvent('pointermove', e);
                 });
 
                 canvas.addEventListener('pointerup', (e) => {
-                    sendEvent('pointerup', e);
 
                     const rect = canvas.getBoundingClientRect();
                     const scaleX = rect.width > 0 ? (CANVAS_WIDTH / rect.width) : 1;
@@ -370,8 +397,9 @@
                                 if (polyPts && polyPts.length > 0) {
                                     const ptsStr = polyPts.map(p => `${Math.round(p.x)},${Math.round(p.y)}`).join(";");
                                     const currentUrl = new URL(parent.location.href);
+                                    const signalId = Date.now();
                                     currentUrl.searchParams.set('poly_pts', ptsStr);
-                                    currentUrl.searchParams.set('force_finish', 'true');
+                                    currentUrl.searchParams.set('force_finish', `true,${signalId}`);
 
                                     throttledReplaceState(currentUrl);
 
@@ -421,6 +449,10 @@
     applyResponsiveScale();
     setupInteraction();
     window.addEventListener("resize", applyResponsiveScale);
-    setInterval(() => { applyResponsiveScale(); setupInteraction(); }, 1000);
+    setInterval(() => {
+        applyResponsiveScale();
+        setupInteraction();
+        if (DRAWING_MODE === "transform") enlargeHandles();
+    }, 1000);
 
 })(window.CANVAS_CONFIG);
