@@ -95,6 +95,7 @@ def cb_apply_pending():
         st.session_state["render_id"] += 1
         st.session_state["canvas_id"] = st.session_state.get("canvas_id", 0) + 1  # Re-enabled to clear box on apply
         st.session_state["canvas_raw"] = {} # Force clear cached objects
+        st.session_state["just_applied"] = True # 🛡️ Guard against object persistence loops
 
 
 def cb_cancel_pending():

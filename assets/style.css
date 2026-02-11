@@ -181,11 +181,29 @@ div[data-testid="stVerticalBlockBordered"] {
 
 /* File Uploader */
 [data-testid="stFileUploader"] {
-    padding: 20px;
+    padding: 10px !important;
     border: 2px dashed #cccccc;
     border-radius: 10px;
     background-color: #ffffff;
     text-align: center;
+}
+
+/* Compact individual file items */
+[data-testid="stFileUploader"] section[data-testid="stFileUploaderDropzone"]>div>div {
+    padding: 0px !important;
+    margin: 0px !important;
+    gap: 5px !important;
+}
+
+/* Specific targeting for the file list item to reduce internal padding */
+[data-testid="stFileUploader"] div[role="listitem"] {
+    padding: 4px 8px !important;
+    margin-bottom: 4px !important;
+}
+
+/* Reduce gap between icon and filename */
+[data-testid="stFileUploader"] div[data-testid="stFileUploaderFileName"] {
+    margin-left: 2px !important;
 }
 
 /* Center align main landing text */
@@ -277,9 +295,11 @@ div[data-testid="stVerticalBlockBordered"] {
 }
 
 /* Ensure Sidebar Toggle (>>) stays visible */
-header [data-testid="stSidebarCollapseButton"] {
+[data-testid="stSidebarCollapseButton"] {
     display: flex !important;
     visibility: visible !important;
+    opacity: 1 !important;
+    color: #31333F !important;
 }
 
 header {
@@ -375,11 +395,13 @@ button[key="global_sync_btn"] {
         display: none !important;
     }
 }
+
 /* Mobile UI Alignment - Prevent Stacking */
 @media (max-width: 768px) {
+
     /* Force Apply/Color/Cancel row to stay horizontal */
-    .mobile-bottom-actions > [data-testid="stHorizontalBlock"],
-    .mobile-bottom-actions [data-testid="stHorizontalBlock"] > div {
+    .mobile-bottom-actions>[data-testid="stHorizontalBlock"],
+    .mobile-bottom-actions [data-testid="stHorizontalBlock"]>div {
         display: flex !important;
         flex-direction: row !important;
         flex-wrap: nowrap !important;
@@ -402,8 +424,8 @@ button[key="global_sync_btn"] {
     }
 
     /* Force Zoom row to stay horizontal */
-    .mobile-zoom-wrapper > [data-testid="stHorizontalBlock"],
-    .mobile-zoom-wrapper [data-testid="stHorizontalBlock"] > div {
+    .mobile-zoom-wrapper>[data-testid="stHorizontalBlock"],
+    .mobile-zoom-wrapper [data-testid="stHorizontalBlock"]>div {
         display: flex !important;
         flex-direction: row !important;
         flex-wrap: nowrap !important;
@@ -424,7 +446,8 @@ button[key="global_sync_btn"] {
         padding: 0 !important;
         margin: 0 !important;
     }
-    .mobile-bottom-actions [data-testid="stColorPicker"] > label {
+
+    .mobile-bottom-actions [data-testid="stColorPicker"]>label {
         display: none !important;
     }
 }

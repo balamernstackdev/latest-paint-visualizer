@@ -62,8 +62,11 @@ def cb_sidebar_tool_sync():
         # Also clear internal state
         st.session_state["force_finish_poly"] = False
         st.session_state["loop_guarded"] = False
-        import streamlit.components.v1 as components
-        components.html("<script>window.parent.STREAMLIT_POLY_POINTS = [];</script>", height=0)
+        st.session_state["force_finish_poly"] = False
+        st.session_state["loop_guarded"] = False
+        
+        # FIX: Defer JS clearing to the render loop to avoid callback reruns
+        st.session_state["tool_switched_reset"] = True
         print(f"DEBUG: Tool Switched -> {last_tool} -> {new_tool}. Signals wiped.")
 
     st.session_state["selection_tool"] = new_tool
@@ -442,6 +445,11 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
     mobile_zoom = query_params.get("zoom_update", "")
     url_pts_raw = query_params.get("poly_pts", "")
     force_finish_raw = query_params.get("force_finish", "")
+    
+    # 🧼 TOOL SWITCH CLEANUP (Silent)
+    if st.session_state.get("tool_switched_reset", False):
+        st.session_state["tool_switched_reset"] = False
+        components.html("<script>if(window.parent.STREAMLIT_POLY_POINTS) window.parent.STREAMLIT_POLY_POINTS = [];</script>", height=0)
 
     # Signal ID Handling: Normalize signals to extract timestamp if present
     def extract_signal(raw_str):
@@ -594,7 +602,17 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
 
     if st.session_state.get("canvas_raw") and not was_just_finished:
         for obj in (st.session_state.get("canvas_raw") or {}).get("objects", []):
-            if obj.get("type") in ["path", "polygon"]:
+            obj_type = obj.get("type")
+            # --- 🛠️ STRICT TOOL FILTERING ---
+            # Only persist objects that belong to the CURRENT tool
+            is_valid = False
+            if drawing_mode == "point" and obj_type == "circle": is_valid = True
+            elif drawing_mode == "rect" and obj_type == "rect": is_valid = True
+            elif drawing_mode == "freedraw" and obj_type == "path": is_valid = True
+            elif drawing_mode == "polygon" and obj_type == "polygon": is_valid = True
+            elif drawing_mode == "transform": is_valid = True # Show all in move mode
+            
+            if is_valid:
                 initial_drawing["objects"].append(obj)
 
     url_pts_raw = st.query_params.get("poly_pts", url_pts_raw)
@@ -637,6 +655,18 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
         json_data = canvas_result.json_data
         st.session_state["canvas_raw"] = json_data
         objects = json_data.get("objects", [])
+        
+        # 🛑 LOOP GUARD: If we just applied, objects should be empty.
+        if st.session_state.get("just_applied", False):
+            st.session_state["just_applied"] = False
+            if objects:
+                # Force clear persistence if st_canvas refused to reset
+                objects = []
+                st.session_state["canvas_raw"] = {}
+                st.session_state["pending_boxes"] = []
+                # Force another rerun to clear the UI ghost
+                safe_rerun()
+
         tool_mode = st.session_state.get("selection_tool", "✨ AI Object (Box)")
         
         if objects:
@@ -682,7 +712,6 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                                 st.session_state["pending_selection"] = {'mask': mask}
                                 cb_apply_pending()
                                 st.session_state["render_id"] += 1
-                                st.session_state["canvas_id"] = st.session_state.get("canvas_id", 0) + 1
                                 safe_rerun()
                         break
 
@@ -725,7 +754,6 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                     if combined_mask is not None:
                          st.session_state["pending_selection"] = {'mask': combined_mask}
                          st.session_state["render_id"] += 1
-                         st.session_state["canvas_id"] = st.session_state.get("canvas_id", 0) + 1
                          safe_rerun()
 
             elif "Polygonal Lasso" in tool_mode:
@@ -807,13 +835,15 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                             is_fill_mode = st.session_state.get("fill_selection", False)
                             print(f"DEBUG: APPLY POLYGON -> Points: {len(pts)}, Finish: {is_finish}, Fill: {is_fill_mode}")
                             
-                            if is_fill_mode:
-                                # 🎨 MANUAL POLYGON FILL
+                            if is_fill_mode or "Polygonal" in tool_mode:
+                                # 🎨 EXACT SHAPE (Manual Fill)
+                                # Default for Polygonal Lasso to ensure precision
                                 mask = np.zeros((h, w), dtype=np.uint8)
                                 cv2.fillPoly(mask, [np.array(pts, np.int32)], 255)
                                 final_mask = mask > 0
+                                print(f"DEBUG: Exact Shape Applied (Points: {len(pts)})")
                             else:
-                                # 🧠 AI SAM MASK (Using polygon as box hint)
+                                # 🧠 AI SAM MASK (Using lasso as box hint)
                                 sam.set_image(st.session_state["image"])
                                 pts_arr = np.array(pts)
                                 box = [np.min(pts_arr[:,0]), np.min(pts_arr[:,1]), np.max(pts_arr[:,0]), np.max(pts_arr[:,1])]
@@ -841,6 +871,19 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                                 safe_rerun()
                 except Exception as e: logging.error(f"Poly Error: {e}")
                 
+            # --- PENDING SELECTION ACTIONS (Inside Fragment) ---
+            if st.session_state.get("pending_selection") is not None:
+                st.markdown('<div class="mobile-bottom-actions">', unsafe_allow_html=True)
+                b_col1, b_col2, b_col3 = st.columns([1, 0.4, 1], gap="small", vertical_alignment="center")
+                with b_col1: 
+                    if st.button("✨ APPLY", use_container_width=True, key="frag_apply", type="primary"):
+                        cb_apply_pending(); safe_rerun() # Fragment scope default
+                with b_col2: st.color_picker("Color", st.session_state.get("picked_color", "#8FBC8F"), label_visibility="collapsed", key="frag_pending_color")
+                with b_col3: 
+                    if st.button("🗑️ CANCEL", use_container_width=True, key="frag_cancel"):
+                        cb_cancel_pending(); safe_rerun() # Fragment scope default
+                st.markdown('</div>', unsafe_allow_html=True)
+
             # --- FINAL SIGNAL CLEANUP ---
             if not is_guarded:
                 # Release guard at end of successful processing
@@ -848,6 +891,24 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
 
     # --- MOBILE SYNC MARKER (Silent) ---
     st.markdown('<div class="sync-ghost-marker" style="display:none;" data-sync-id="mobile_ghost"></div>', unsafe_allow_html=True)
+    
+    # 5. BOTTOM NAV (Inside Fragment)
+    st.markdown('<div class="mobile-zoom-wrapper" style="margin-top: 10px;"></div>', unsafe_allow_html=True)
+    render_zoom_controls(key_suffix="frag", context_class="mobile-zoom-wrapper")
+    
+    # 6. UNDO/REDO (Inside Fragment)
+    if st.session_state["masks"] or st.session_state.get("masks_redo"):
+        st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
+        btn_col1, btn_col2, btn_col3 = st.columns([1, 1, 1])
+        with btn_col1:
+            if st.button("⏪ Undo", use_container_width=True, key="frag_undo_btn", disabled=not st.session_state["masks"]):
+                cb_undo(); safe_rerun()
+        with btn_col2:
+            if st.button("⏩ Redo", use_container_width=True, key="frag_redo_btn", disabled=not st.session_state.get("masks_redo")):
+                cb_redo(); safe_rerun()
+        with btn_col3:
+             if st.button("🗑️ Clear", use_container_width=True, key="frag_clear_btn"):
+                cb_clear_all(); safe_rerun()
 
 def render_visualizer_engine_v11(display_width):
     """De-fragmented wrapper for the canvas and external UI controls."""
@@ -895,53 +956,8 @@ def render_visualizer_engine_v11(display_width):
     
     render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_w, view_h, scale_factor, h, w, drawing_mode)
 
-    # 4. BOTTOM NAV (Outside fragment)
-    st.markdown('<div class="mobile-zoom-wrapper" style="margin-top: 10px;"></div>', unsafe_allow_html=True)
-    render_zoom_controls(key_suffix="mobile", context_class="mobile-zoom-wrapper")
-    
-    # 🧪 LASSO TUNING (Contextual) - HIDDEN per user request
-    # if "Lasso" in tool_mode or "Polygonal" in tool_mode:
-    #     st.markdown('<div class="mobile-brush-tuning" data-desktop-hide="true" style="margin: 10px 0;">', unsafe_allow_html=True)
-    #     t_col1, t_col2 = st.columns([0.3, 0.7], vertical_alignment="center")
-    #     with t_col1: st.markdown("**Size** 🖌️")
-    #     with t_col2: st.slider("Thickness", 1, 50, st.session_state.get("lasso_thickness", 6), key="lasso_thickness", label_visibility="collapsed")
-    #     st.markdown('</div>', unsafe_allow_html=True)
-    if st.session_state.get("pending_selection") is not None:
-        st.markdown('<div class="mobile-bottom-actions">', unsafe_allow_html=True)
-        b_col1, b_col2, b_col3 = st.columns([1, 0.4, 1], gap="small", vertical_alignment="center")
-        with b_col1: 
-            if st.button("✨ APPLY", use_container_width=True, key="mob_apply", type="primary"):
-                cb_apply_pending(); safe_rerun(scope="app")
-        with b_col2: st.color_picker("Color", st.session_state.get("picked_color", "#8FBC8F"), label_visibility="collapsed", key="mob_pending_color")
-        with b_col3: 
-            if st.button("🗑️ CANCEL", use_container_width=True, key="mob_cancel"):
-                cb_cancel_pending(); safe_rerun(scope="app")
-        st.markdown('</div>', unsafe_allow_html=True)
-    elif "Polygonal Lasso" in tool_mode:
-        # Double-click auto-finishes, no manual buttons needed
-        pass
-        # st.markdown('<div class="mobile-bottom-actions">', unsafe_allow_html=True)
-        # f_col1, f_col2 = st.columns([1, 1], gap="small")
-        # with f_col1:
-        #     if st.button("🏁 FINISH", use_container_width=True, key="mob_poly_finish", type="primary"):
-        #         st.session_state["force_finish_poly"] = True; safe_rerun()
-        # with f_col2:
-        #     if st.button("🗑️ CLEAR", use_container_width=True, key="mob_poly_clear"):
-        #         st.session_state["canvas_id"] = st.session_state.get("canvas_id", 0) + 1; safe_rerun()
-        # st.markdown('</div>', unsafe_allow_html=True)
-
-    if st.session_state["masks"] or st.session_state.get("masks_redo"):
-        st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
-        btn_col1, btn_col2, btn_col3 = st.columns([1, 1, 1])
-        with btn_col1:
-            if st.button("⏪ Undo", use_container_width=True, key="main_undo_btn", disabled=not st.session_state["masks"]):
-                cb_undo(); safe_rerun()
-        with btn_col2:
-            if st.button("⏩ Redo", use_container_width=True, key="main_redo_btn", disabled=not st.session_state.get("masks_redo")):
-                cb_redo(); safe_rerun()
-        with btn_col3:
-             if st.button("🗑️ Clear", use_container_width=True, key="main_clear_btn"):
-                cb_clear_all(); safe_rerun()
+    # UI Controls (Zoom, Undo, etc.) have been moved INSIDE the fragment
+    pass
 
     # Removed tuning_container from top - moved to bottom
 
@@ -1128,17 +1144,24 @@ def render_sidebar(sam, device_str):
                 elif "Lasso (Freehand)" in current_tool:
                     st.caption("Instructions: Draw your area. Paint applies when you release.")
             
+            # 🛠️ LOGIC: If "Fill Selection" (Manual) is ON, "Wall Priority" (AI) is irrelevant
+            # HIDDEN: User requested to hide "Fill Entire Selection" option (Step 1823)
+            # is_fill_active = st.session_state.get("fill_selection", False)
+            is_fill_active = False # Force to False since option is hidden
+
             st.toggle("Wall Priority Mode 🧱", 
                       value=st.session_state.get("is_wall_only", True), 
                       key="wall_priority_toggle",
+                      # disabled=is_fill_active, # 🔒 Disable when Manual Fill is ON
                       on_change=lambda: st.session_state.update({"is_wall_only": st.session_state.wall_priority_toggle}),
                       help="**ON (Default):** Stricter borders. Keeps paint on the specific wall face you clicked.\n\n**OFF:** Relaxes borders. Use this if paint is leaving gaps or for furniture/small objects.")
 
-            st.toggle("Fill Entire Selection (Non-AI) 🎨", 
-                      value=st.session_state.get("fill_selection", False), 
-                      key="fill_selection_toggle",
-                      on_change=lambda: st.session_state.update({"fill_selection": st.session_state.fill_selection_toggle}),
-                      help="**ON:** Paints the *entire* inside of your Box or Lasso selection. Best for simple walls or when AI misses details.\n\n**OFF (AI Mode):** Uses AI to intelligently find objects within your marked area.")
+            # HIDDEN: User requested to remove this to avoid confusion
+            # st.toggle("Fill Entire Selection (Non-AI) 🎨", 
+            #           value=is_fill_active, 
+            #           key="fill_selection_toggle",
+            #           on_change=lambda: st.session_state.update({"fill_selection": st.session_state.fill_selection_toggle}),
+            #           help="**ON:** Paints the *entire* inside of your Box or Lasso selection. Best for simple walls or when AI misses details.\n\n**OFF (AI Mode):** Uses AI to intelligently find objects within your marked area.")
 
             if st.session_state.get("pending_selection") is not None or st.session_state.get("pending_boxes"):
                 if st.button("🚫 Clear Selection Draft", use_container_width=True, help="Reset the current selection without applying it."):
@@ -1162,7 +1185,7 @@ def render_sidebar(sam, device_str):
             st.toggle("Compare Before/After", key="show_comparison")
 
             # Render Desktop Zoom Controls (Hidden on Mobile)
-            render_zoom_controls(key_suffix="sidebar", context_class="desktop-zoom-wrapper")
+            # render_zoom_controls(key_suffix="sidebar", context_class="desktop-zoom-wrapper")
             st.divider()
             sidebar_paint_fragment()
             st.divider()

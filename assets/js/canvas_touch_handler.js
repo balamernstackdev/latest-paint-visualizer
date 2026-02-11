@@ -406,6 +406,7 @@
                                     // Always trigger rerun for polygon finish
                                     triggerRerun();
                                     clearPersistentDots(); // CLEAR DOTS ON FINISH
+                                    window.parent.STREAMLIT_POLY_POINTS = []; // CLEAR INTERNAL STATE
                                 }
                             } else {
                                 // Single click: Add point
@@ -423,7 +424,9 @@
                                     showPersistentDot(e.clientX, e.clientY); // Fallback
                                 }
                             }
-                        } else if (["point", "freedraw", "rect"].includes(canvas.dataset.drawingMode)) {
+                            // FIX: Only trigger manual tap for "point" mode (AI Click).
+                            // "rect" (AI Object) and "freedraw" (Lasso) should rely on st_canvas sync only.
+                        } else if (canvas.dataset.drawingMode === "point") {
                             updateTap(offX, offY);
                         }
                     } else if (canvas.dataset.drawingMode === "point") {
