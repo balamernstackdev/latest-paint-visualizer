@@ -269,18 +269,10 @@ div[data-testid="stVerticalBlockBordered"] {
     }
 }
 
-/* HIDE LIVE UI NOISE (Share, GitHub, Star, etc.) */
-[data-testid="stDecoration"],
-.stAppDeployButton,
-header [data-testid="stToolbar"] {
-    display: none !important;
-}
-
+/* REVERTED: Restoring stable native layout to fix missing sidebar button */
 header {
     background-color: transparent !important;
 }
-
-/* REVERTED: Custom sidebar button overrides removed to restore native behavior */
 
 [data-testid="stSidebarCollapseButton"] svg {
     fill: #31333F !important;
