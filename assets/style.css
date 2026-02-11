@@ -269,9 +269,13 @@ div[data-testid="stVerticalBlockBordered"] {
     }
 }
 
-/* REVERTED: Standard Streamlit header elements restored */
+/* HIDE LIVE UI NOISE (Share, GitHub, Star, etc.) */
+[data-testid="stDecoration"],
+.stAppDeployButton,
+header [data-testid="stToolbar"] {
+    display: none !important;
+}
 
-/* REVERTED: Custom header overrides removed to restore native layout */
 header {
     background-color: transparent !important;
 }
