@@ -67,6 +67,7 @@ def cb_sidebar_tool_sync():
         
         # FIX: Defer JS clearing to the render loop to avoid callback reruns
         st.session_state["tool_switched_reset"] = True
+        st.session_state["fill_selection"] = False
         print(f"DEBUG: Tool Switched -> {last_tool} -> {new_tool}. Signals wiped.")
 
     st.session_state["selection_tool"] = new_tool
@@ -700,9 +701,34 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                                         scaled_cmd.append(int(cmd[i] / scale_factor) + start_x)
                                         scaled_cmd.append(int(cmd[i+1] / scale_factor) + start_y)
                                     scaled_path.append(scaled_cmd)
-                            # 🎨 FILL SELECTION MODE (Non-AI)
+                            # 🎨 FILL SELECTION MODE vs 🧠 AI LASSO MODE
                             is_fill_mode = st.session_state.get("fill_selection", False)
-                            mask = process_lasso_path(scaled_path, w, h, thickness=st.session_state.get("lasso_thickness", 6), fill=is_fill_mode)
+                            
+                            if is_fill_mode:
+                                mask = process_lasso_path(scaled_path, w, h, thickness=st.session_state.get("lasso_thickness", 6), fill=True)
+                            else:
+                                # 🧠 AI LASSO MODE (Box Prompt from Lasso)
+                                x_coords = [c[i] for c in scaled_path for i in range(1, len(c), 2)]
+                                y_coords = [c[i+1] for c in scaled_path for i in range(1, len(c), 2)]
+                                
+                                if x_coords:
+                                    box = [min(x_coords), min(y_coords), max(x_coords), max(y_coords)]
+                                    # Ensure minimal box size
+                                    if (box[2]-box[0]) > 5 and (box[3]-box[1]) > 5:
+                                        if not getattr(sam, "is_image_set", False): 
+                                            sam.set_image(st.session_state["image"])
+                                        mask = sam.generate_mask(
+                                            box_coords=box, 
+                                            level=st.session_state.get("mask_level", 0), 
+                                            is_wall_only=st.session_state.get("is_wall_only", False)
+                                        )
+                                    else:
+                                        mask = np.zeros((h, w), dtype=bool)
+                                else:
+                                    mask = np.zeros((h, w), dtype=bool)
+                                
+                                # Fallback to brush if AI returns nothing (optional, but let's stick to AI-only for now to match behavior)
+                                if mask is None: mask = np.zeros((h, w), dtype=bool)
                             
                             if mask.any():
                                 # DEBUG: Log operation mode before applying
@@ -1109,7 +1135,7 @@ def render_sidebar(sam, device_str):
                                     on_change=cb_sidebar_op_sync)
             
             # --- Tool Specific Controls (Full Width) ---
-            if "AI Click" in current_tool:
+            if any(t in current_tool for t in ["AI Click", "Lasso", "AI Object"]):
                 st.caption("Layer Scope:")
                 prec_options = ["Standard Walls", "Small Details", "Whole Object"]
                 current_idx = min(st.session_state.get("mask_level", 0), 2)
@@ -1145,14 +1171,19 @@ def render_sidebar(sam, device_str):
                     st.caption("Instructions: Draw your area. Paint applies when you release.")
             
             # 🛠️ LOGIC: If "Fill Selection" (Manual) is ON, "Wall Priority" (AI) is irrelevant
-            # HIDDEN: User requested to hide "Fill Entire Selection" option (Step 1823)
-            # is_fill_active = st.session_state.get("fill_selection", False)
-            is_fill_active = False # Force to False since option is hidden
+            is_fill_active = st.session_state.get("fill_selection", False)
+
+            if "Lasso (Freehand)" in current_tool:
+                st.toggle("Apply Paint Fully Inside 🎨", 
+                      value=is_fill_active, 
+                      key="fill_selection_toggle",
+                      on_change=lambda: st.session_state.update({"fill_selection": st.session_state.fill_selection_toggle}),
+                      help="**ON:** Paints the *entire* inside of your Lasso selection (Manual Mode).\n\n**OFF (AI Mode):** Uses AI to intelligently detect objects within your lasso.")
 
             st.toggle("Wall Priority Mode 🧱", 
                       value=st.session_state.get("is_wall_only", True), 
                       key="wall_priority_toggle",
-                      # disabled=is_fill_active, # 🔒 Disable when Manual Fill is ON
+                      disabled=(is_fill_active and "Lasso (Freehand)" in current_tool), 
                       on_change=lambda: st.session_state.update({"is_wall_only": st.session_state.wall_priority_toggle}),
                       help="**ON (Default):** Stricter borders. Keeps paint on the specific wall face you clicked.\n\n**OFF:** Relaxes borders. Use this if paint is leaving gaps or for furniture/small objects.")
 
