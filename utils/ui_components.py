@@ -301,6 +301,31 @@ def setup_styles():
     
     st.markdown(full_css, unsafe_allow_html=True)
 
+    # --- SILENCE CONSOLE WARNINGS (Main Window Injection) ---
+    # This script intercepts browser console warnings originating from Streamlit or dependencies
+    st.markdown("""
+        <script>
+        (function() {
+            const _backupWarn = console.warn;
+            const _backupError = console.error;
+            
+            const filterPattern = /Unrecognized feature|ambient-light-sensor|battery|document-domain|layout-animations|legacy-image-formats|oversized-images|vr|wake-lock|allow-scripts|allow-same-origin|escape its sandboxing|Invalid color|theme\.sidebar|widgetBackground/i;
+            
+            console.warn = function(...args) {
+                const msg = (args[0] || '').toString();
+                if (filterPattern.test(msg)) return;
+                _backupWarn.apply(console, args);
+            };
+            
+            console.error = function(...args) {
+                const msg = (args[0] || '').toString();
+                if (filterPattern.test(msg)) return;
+                _backupError.apply(console, args);
+            };
+        })();
+        </script>
+    """, unsafe_allow_html=True)
+
     # # Mobile: Aggressive sidebar protection
     # st.markdown("""
     # <script>
@@ -442,6 +467,7 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
     # --- 1. CAPTURE & CLEAR INTERACTION PARAMS ---
     query_params = st.query_params
     mobile_tap = query_params.get("tap", "")
+    mobile_box = query_params.get("box", "")
     mobile_pan = query_params.get("pan_update", "")
     mobile_zoom = query_params.get("zoom_update", "")
     url_pts_raw = query_params.get("poly_pts", "")
@@ -466,13 +492,14 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
         return raw_str, None
 
     mobile_tap, tap_sid = extract_signal(mobile_tap)
+    mobile_box, box_sid = extract_signal(mobile_box)
     mobile_pan, pan_sid = extract_signal(mobile_pan)
     force_finish, finish_sid = extract_signal(force_finish_raw)
     is_finish = (force_finish == "true") or st.session_state.get("force_finish_poly", False)
 
     # SILENT LOOP BREAKER: Guard against rapid successive fragment reruns
     is_guarded = st.session_state.get("loop_guarded", False)
-    has_interaction = any([mobile_tap, mobile_pan, mobile_zoom, url_pts_raw])
+    has_interaction = any([mobile_tap, mobile_box, mobile_pan, mobile_zoom, url_pts_raw])
     
     # Skip heavy signal processing if guarded, but DO NOT return (renders canvas)
     # UNLESS it is a finish command which is high priority
@@ -480,12 +507,25 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
     
     if skip_processing:
         # Clear signals immediately to break potential loop
-        for pk in ["tap", "pan_update", "zoom_update", "poly_pts"]:
+        for pk in ["tap", "box", "pan_update", "zoom_update", "poly_pts"]:
             if pk in st.query_params: st.query_params.pop(pk, None)
     
     if has_interaction and not skip_processing:
         st.session_state["loop_guarded"] = True
-        print(f"DEBUG: Processing Interaction -> Tool:{drawing_mode}, Tap:{bool(mobile_tap)}, Finish:{is_finish}, HasPolyPts:{bool(url_pts_raw)}")
+        print(f"DEBUG: Processing Interaction -> Tool:{drawing_mode}, Tap:{bool(mobile_tap)}, Box:{bool(mobile_box)}, Finish:{is_finish}")
+
+    # --- 🔔 TOP ACTION BAR (Immediate Visibility) ---
+    # Render Apply/Cancel buttons at the TOP for mobile accessibility
+    if st.session_state.get("pending_selection") is not None:
+        st.info("✨ Selection Active! Confirm below.", icon="👇")
+        with st.container(border=True):
+            cols = st.columns([1, 1], gap="small")
+            with cols[0]: 
+                if st.button("✨ APPLY PAINT", use_container_width=True, key="top_frag_apply", type="primary"):
+                    cb_apply_pending(); safe_rerun()
+            with cols[1]: 
+                if st.button("🗑️ CANCEL", use_container_width=True, key="top_frag_cancel"):
+                    cb_cancel_pending(); safe_rerun()
 
     original_img = st.session_state["image"]
     painted_img = composite_image(original_img, st.session_state["masks"])
@@ -528,9 +568,10 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                 if click_state_key != st.session_state.get("last_mobile_tap"):
                     st.session_state["last_mobile_tap"] = click_state_key
                     
-                    # 🎯 TOOL SEPARATION: Skip point-tap logic for Polygon, Rect, and Transform
+                    # 🎯 TOOL SEPARATION: Skip point-tap logic for Polygon and Transform
                     # For these tools, interactions are processed via objects/poly_pts
-                    is_direct_tap_tool = drawing_mode not in ["polygon", "rect", "transform"]
+                    # ENABLED 'rect' (AI Object) to allow "Tap to Select" on mobile
+                    is_direct_tap_tool = drawing_mode not in ["polygon", "transform"]
                     
                     if is_direct_tap_tool: # Standard point selection (AI Click, etc.)
                         if not getattr(sam, "is_image_set", False): 
@@ -545,8 +586,10 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                         if mask is not None:
                             st.session_state["pending_selection"] = {'mask': mask, 'point': (real_x, real_y)}
                             
-                            # CRITICAL: Apply paint immediately on mobile
-                            cb_apply_pending()
+                            # CRITICAL: Apply paint immediately on mobile ONLY for Point/Lasso
+                            # For AI Object (rect), we want to show the Review/Confirm buttons first
+                            if drawing_mode != "rect":
+                                cb_apply_pending()
                             
                             st.session_state["render_id"] += 1
                             st.session_state["canvas_id"] = st.session_state.get("canvas_id", 0) + 1
@@ -566,6 +609,58 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                 import traceback
                 traceback.print_exc()
 
+    if mobile_box and mobile_box.strip() != "" and not skip_processing:
+        # SIGNAL GUARD: Ensure we only process this specific box ONCE
+        if box_sid and box_sid == st.session_state.get("last_box_sid"):
+            mobile_box = None
+        else:
+            if box_sid: st.session_state["last_box_sid"] = box_sid
+
+        if mobile_box:
+            try:
+                parts = mobile_box.split(",")
+                if len(parts) >= 4:
+                    x1, y1, x2, y2 = int(float(parts[0])), int(float(parts[1])), int(float(parts[2])), int(float(parts[3]))
+                    print(f"DEBUG: Mobile Box Handler -> {x1},{y1} to {x2},{y2} (Scale: {scale_factor})")
+                    
+                    # Convert to real image coordinates
+                    bx1 = int(x1 / scale_factor) + start_x
+                    by1 = int(y1 / scale_factor) + start_y
+                    bx2 = int(x2 / scale_factor) + start_x
+                    by2 = int(y2 / scale_factor) + start_y
+                    
+                    # Ensure properly ordered coordinates (min/max)
+                    final_box = [min(bx1, bx2), min(by1, by2), max(bx1, bx2), max(by1, by2)]
+                    
+                    # Validate box size (ignore tiny accidentals)
+                    if abs(final_box[2] - final_box[0]) > 5 and abs(final_box[3] - final_box[1]) > 5:
+                        if not getattr(sam, "is_image_set", False): 
+                            sam.set_image(st.session_state["image"])
+                            
+                        mask = sam.generate_mask(
+                            box_coords=final_box, 
+                            level=st.session_state.get("mask_level", 0), 
+                            is_wall_only=st.session_state.get("is_wall_only", False)
+                        )
+                        
+                        if mask is not None:
+                            st.session_state["pending_selection"] = {'mask': mask}
+                            st.session_state["pending_box_coords"] = final_box 
+                            
+                            # ⚡ AUTO-APPLY: JS "Apply" button confirmed this action
+                            cb_apply_pending()
+
+                            st.session_state["render_id"] += 1
+                            st.session_state["canvas_id"] = st.session_state.get("canvas_id", 0) + 1
+                            
+                            safe_rerun()
+                
+                st.query_params.pop("box", None)
+            except Exception as e:
+                print(f"ERROR in mobile box: {e}")
+                import traceback
+                traceback.print_exc()
+                
     if mobile_pan and mobile_pan.strip() != "":
         # SIGNAL GUARD: Ensure we only process this specific pan ONCE
         if pan_sid and pan_sid == st.session_state.get("last_pan_sid"):
@@ -648,7 +743,13 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
     js_file_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "js", "canvas_touch_handler.js")
     if os.path.exists(js_file_path):
         with open(js_file_path, 'r', encoding='utf-8') as f: js_template = f.read()
-        js_config = f"<script>window.CANVAS_CONFIG = {{ CANVAS_WIDTH: {display_width}, CANVAS_HEIGHT: {display_height}, CUR_PAN_X: {st.session_state['pan_x']}, CUR_PAN_Y: {st.session_state['pan_y']}, VIEW_W: {view_w}, IMAGE_W: {w}, VIEW_H: {view_h}, IMAGE_H: {h}, DRAWING_MODE: '{drawing_mode}' }};</script><script>{js_template}</script>"
+        if not st.session_state.get("pending_selection"): st.session_state["pending_box_coords"] = None
+
+        # Prepare pending box for JS re-hydration (Editable Box UI)
+        p_box = st.session_state.get("pending_box_coords", None)
+        p_box_json = str(p_box) if p_box else "null"
+        
+        js_config = f"<script>const cfg={{ CANVAS_WIDTH: {display_width}, CANVAS_HEIGHT: {display_height}, CUR_PAN_X: {st.session_state['pan_x']}, CUR_PAN_Y: {st.session_state['pan_y']}, VIEW_W: {view_w}, IMAGE_W: {w}, VIEW_H: {view_h}, IMAGE_H: {h}, DRAWING_MODE: '{drawing_mode}', PENDING_BOX: {p_box_json} }}; window.CANVAS_CONFIG=cfg; if(window.parent) window.parent.CANVAS_CONFIG=cfg;</script><script>{js_template}</script>"
         components.html(js_config, height=0)
 
     # 🔄 SYNC & PROCESS (Silent)
@@ -795,6 +896,65 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                             # 🧩 Robustly handle list or string from Streamlit query params
                             raw_str = url_pts_raw[0] if isinstance(url_pts_raw, (list, tuple)) else str(url_pts_raw)
                             
+                            # Handle mobile box input
+                            mobile_box = st.query_params.get("box")
+                            if mobile_box:
+                                try:
+                                    # Support multiple boxes separated by '|'
+                                    # Format: "x1,y1,x2,y2|x1,y1,x2,y2,timestamp"
+                                    box_strs = mobile_box.split("|")
+                                    
+                                    accumulated_mask = None
+                                    last_box_coords = None # For persisting last view
+                                    
+                                    for b_str in box_strs:
+                                        params = b_str.split(",")
+                                        if len(params) < 4: continue
+                                        
+                                        # Extract coords 
+                                        x1, y1, x2, y2 = float(params[0]), float(params[1]), float(params[2]), float(params[3])
+                                        
+                                        # Convert Canvas Coords -> Image Coords
+                                        # Use existing context variables
+                                        real_x1 = int(x1 / scale_factor) + start_x
+                                        real_y1 = int(y1 / scale_factor) + start_y
+                                        real_x2 = int(x2 / scale_factor) + start_x
+                                        real_y2 = int(y2 / scale_factor) + start_y
+                                        
+                                        final_box = [real_x1, real_y1, real_x2, real_y2]
+                                        last_box_coords = final_box
+
+                                        # SAM Prediction
+                                        # Assuming 'sam' is the SAM predictor object
+                                        if not getattr(sam, "is_image_set", False): sam.set_image(st.session_state["image"])
+                                        mask = sam.generate_mask(
+                                            box_coords=final_box,
+                                            level=st.session_state.get("mask_level", 0),
+                                            is_wall_only=st.session_state.get("is_wall_only", False)
+                                        )
+                                        
+                                        if mask is not None:
+                                             if accumulated_mask is None: accumulated_mask = mask
+                                             else: accumulated_mask = np.logical_or(accumulated_mask, mask)
+
+                                    # Process final mask
+                                    if accumulated_mask is not None:
+                                        st.session_state["pending_selection"] = {'mask': accumulated_mask}
+                                        st.session_state["pending_box_coords"] = last_box_coords 
+                                        
+                                        # ⚡ AUTO-APPLY
+                                        cb_apply_pending()
+
+                                        st.session_state["render_id"] += 1
+                                        st.session_state["canvas_id"] = st.session_state.get("canvas_id", 0) + 1
+                                        
+                                        safe_rerun()
+                                    
+                                    st.query_params.pop("box", None)
+
+                                except Exception as e:
+                                    print(f"ERROR in mobile box: {e}")
+                            
                             for p in raw_str.split(";"):
                                 if "," in p:
                                     try:
@@ -899,20 +1059,21 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                 
             # --- PENDING SELECTION ACTIONS (Inside Fragment) ---
             if st.session_state.get("pending_selection") is not None:
-                st.markdown('<div class="mobile-bottom-actions">', unsafe_allow_html=True)
-                b_col1, b_col2, b_col3 = st.columns([1, 0.4, 1], gap="small", vertical_alignment="center")
-                with b_col1: 
-                    if st.button("✨ APPLY", use_container_width=True, key="frag_apply", type="primary"):
-                        cb_apply_pending(); safe_rerun() # Fragment scope default
-                with b_col2: st.color_picker("Color", st.session_state.get("picked_color", "#8FBC8F"), label_visibility="collapsed", key="frag_pending_color")
-                with b_col3: 
-                    if st.button("🗑️ CANCEL", use_container_width=True, key="frag_cancel"):
-                        cb_cancel_pending(); safe_rerun() # Fragment scope default
-                st.markdown('</div>', unsafe_allow_html=True)
+                st.toast("✨ Selection Ready! Apply or Cancel below 👇", icon="🎨")
+                st.markdown("### ✨ Confirm Selection")
+                with st.container(border=True):
+                    b_col1, b_col2, b_col3 = st.columns([1, 0.4, 1], gap="small", vertical_alignment="center")
+                    with b_col1: 
+                        if st.button("✨ APPLY", use_container_width=True, key="frag_apply", type="primary"):
+                            cb_apply_pending(); safe_rerun() # Fragment scope default
+                    with b_col2: st.color_picker("Color", st.session_state.get("picked_color", "#8FBC8F"), label_visibility="collapsed", key="frag_pending_color")
+                    with b_col3: 
+                        if st.button("🗑️ CANCEL", use_container_width=True, key="frag_cancel"):
+                            cb_cancel_pending(); safe_rerun() # Fragment scope default
 
             # --- FINAL SIGNAL CLEANUP ---
-            if not is_guarded:
-                # Release guard at end of successful processing
+            # Release guard if no interaction is currently being processed
+            if not has_interaction:
                 st.session_state["loop_guarded"] = False
 
     # --- MOBILE SYNC MARKER (Silent) ---
