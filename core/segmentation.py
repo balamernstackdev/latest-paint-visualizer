@@ -72,8 +72,7 @@ class SegmentationEngine:
         logger.info("Embeddings and features computed.")
 
     def generate_mask(self, point_coords=None, point_labels=None, box_coords=None, level=None, is_wall_only=False, cleanup=True):
-        print(f"DEBUG: Entering generate_mask v4.1 (Cleaned abs_edges)")
-        abs_edges = None # Safety init
+        print(f"DEBUG: Entering generate_mask v4.2 (Edge Map Renamed)")
         is_small_object = False # Initialize to prevent UnboundLocalError in Box Mode
         if self.predictor is None:
             return None
