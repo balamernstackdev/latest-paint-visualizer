@@ -1266,12 +1266,13 @@ def render_sidebar(sam, device_str):
                       on_change=lambda: st.session_state.update({"fill_selection": st.session_state.fill_selection_toggle}),
                       help="**ON:** Paints the *entire* inside of your Lasso selection (Manual Mode).\n\n**OFF (AI Mode):** Uses AI to intelligently detect objects within your lasso.")
 
-            st.toggle("Wall Priority Mode 🧱", 
-                      value=st.session_state.get("is_wall_only", True), 
-                      key="wall_priority_toggle",
-                      disabled=(is_fill_active and "Lasso (Freehand)" in current_tool), 
-                      on_change=lambda: st.session_state.update({"is_wall_only": st.session_state.wall_priority_toggle}),
-                      help="**ON (Default):** Stricter borders. Keeps paint on the specific wall face you clicked.\n\n**OFF:** Relaxes borders. Use this if paint is leaving gaps or for furniture/small objects.")
+            # HIDDEN: User requested to remove this to avoid confusion. Default remains ON for accuracy.
+            # st.toggle("Wall Priority Mode 🧱", 
+            #           value=st.session_state.get("is_wall_only", True), 
+            #           key="wall_priority_toggle",
+            #           disabled=(is_fill_active and "Lasso (Freehand)" in current_tool), 
+            #           on_change=lambda: st.session_state.update({"is_wall_only": st.session_state.wall_priority_toggle}),
+            #           help="**ON (Default):** Stricter borders. Keeps paint on the specific wall face you clicked.\n\n**OFF:** Relaxes borders. Use this if paint is leaving gaps or for furniture/small objects.")
 
             # HIDDEN: User requested to remove this to avoid confusion
             # st.toggle("Fill Entire Selection (Non-AI) 🎨", 
