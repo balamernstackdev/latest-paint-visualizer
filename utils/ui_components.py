@@ -48,10 +48,18 @@ def cb_top_wall_sync_v2():
     st.session_state["is_wall_only"] = st.session_state.get("top_wall_control", True)
     st.session_state["sidebar_wall_toggle"] = st.session_state["is_wall_only"]
 
-def cb_sidebar_tool_sync():
+def cb_sidebar_tool_sync(widget_key=None):
     """Sync sidebar radio to master selection_tool and top ICON switcher."""
-    new_tool = st.session_state.get("sidebar_tool_radio")
+    # Use dynamic key based on current canvas_id
+    if widget_key is None:
+        cid = st.session_state.get("canvas_id", 0)
+        widget_key = f"sidebar_tool_radio_{cid}"
+    
+    new_tool = st.session_state.get(widget_key)
     print(f"DEBUG: CALLBACK sidebar_tool_radio -> {new_tool} (Current: {st.session_state.get('selection_tool')})")
+    
+    if new_tool is None: return
+
     # --- 🛠️ CLEAN TOOL SWITCH ---
     last_tool = st.session_state.get("selection_tool")
     if last_tool != new_tool:
@@ -568,12 +576,11 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                 if click_state_key != st.session_state.get("last_mobile_tap"):
                     st.session_state["last_mobile_tap"] = click_state_key
                     
-                    # 🎯 TOOL SEPARATION: Skip point-tap logic for Polygon and Transform
-                    # For these tools, interactions are processed via objects/poly_pts
-                    # ENABLED 'rect' (AI Object) to allow "Tap to Select" on mobile
-                    is_direct_tap_tool = drawing_mode not in ["polygon", "transform"]
+                    # 🎯 TOOL SEPARATION: Skip point-tap logic for Polygon, Transform AND Box (Rect)
+                    # For Box mode, we force the user to Drag. Tapping is disabled to prevent accidental Point logic.
+                    is_direct_tap_tool = drawing_mode not in ["polygon", "transform", "rect"]
                     
-                    if is_direct_tap_tool: # Standard point selection (AI Click, etc.)
+                    if is_direct_tap_tool: # Standard point selection (AI Click only)
                         if not getattr(sam, "is_image_set", False): 
                             sam.set_image(st.session_state["image"])
                         
@@ -618,10 +625,22 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
 
         if mobile_box:
             try:
-                parts = mobile_box.split(",")
-                if len(parts) >= 4:
-                    x1, y1, x2, y2 = int(float(parts[0])), int(float(parts[1])), int(float(parts[2])), int(float(parts[3]))
-                    print(f"DEBUG: Mobile Box Handler -> {x1},{y1} to {x2},{y2} (Scale: {scale_factor})")
+                print(f"DEBUG: Msg received -> {mobile_box}")
+                # Support multiple boxes separated by '|'
+                box_strs = mobile_box.split("|")
+                accumulated_mask = None
+                last_box_coords = None
+
+                for b_str in box_strs:
+                    print(f"DEBUG: Processing box token -> {b_str}")
+                    parts = b_str.split(",")
+                    if len(parts) < 4: 
+                        print("DEBUG: Invalid parts length")
+                        continue
+                    
+                    # Extract coords (ignore timestamp)
+                    x1, y1, x2, y2 = float(parts[0]), float(parts[1]), float(parts[2]), float(parts[3])
+                    print(f"DEBUG: Parsed Coords -> {x1}, {y1}, {x2}, {y2}")
                     
                     # Convert to real image coordinates
                     bx1 = int(x1 / scale_factor) + start_x
@@ -629,10 +648,11 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                     bx2 = int(x2 / scale_factor) + start_x
                     by2 = int(y2 / scale_factor) + start_y
                     
-                    # Ensure properly ordered coordinates (min/max)
+                    # Ensure properly ordered coordinates
                     final_box = [min(bx1, bx2), min(by1, by2), max(bx1, bx2), max(by1, by2)]
-                    
-                    # Validate box size (ignore tiny accidentals)
+                    last_box_coords = final_box
+
+                    # Validate size
                     if abs(final_box[2] - final_box[0]) > 5 and abs(final_box[3] - final_box[1]) > 5:
                         if not getattr(sam, "is_image_set", False): 
                             sam.set_image(st.session_state["image"])
@@ -644,20 +664,24 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                         )
                         
                         if mask is not None:
-                            st.session_state["pending_selection"] = {'mask': mask}
-                            st.session_state["pending_box_coords"] = final_box 
-                            
-                            # ⚡ AUTO-APPLY: JS "Apply" button confirmed this action
-                            cb_apply_pending()
+                             if accumulated_mask is None: accumulated_mask = mask
+                             else: accumulated_mask = np.logical_or(accumulated_mask, mask)
 
-                            st.session_state["render_id"] += 1
-                            st.session_state["canvas_id"] = st.session_state.get("canvas_id", 0) + 1
-                            
-                            safe_rerun()
+                if accumulated_mask is not None:
+                    st.session_state["pending_selection"] = {'mask': accumulated_mask}
+                    st.session_state["pending_box_coords"] = last_box_coords 
+                    
+                    # ⚡ AUTO-APPLY
+                    cb_apply_pending()
+
+                    st.session_state["render_id"] += 1
+                    st.session_state["canvas_id"] = st.session_state.get("canvas_id", 0) + 1
+                    
+                    safe_rerun()
                 
                 st.query_params.pop("box", None)
             except Exception as e:
-                print(f"ERROR in mobile box: {e}")
+                print(f"ERROR in mobile box logic: {e}")
                 import traceback
                 traceback.print_exc()
                 
@@ -758,7 +782,6 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
         st.session_state["canvas_raw"] = json_data
         objects = json_data.get("objects", [])
         
-        # 🛑 LOOP GUARD: If we just applied, objects should be empty.
         if st.session_state.get("just_applied", False):
             st.session_state["just_applied"] = False
             if objects:
@@ -896,64 +919,7 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                             # 🧩 Robustly handle list or string from Streamlit query params
                             raw_str = url_pts_raw[0] if isinstance(url_pts_raw, (list, tuple)) else str(url_pts_raw)
                             
-                            # Handle mobile box input
-                            mobile_box = st.query_params.get("box")
-                            if mobile_box:
-                                try:
-                                    # Support multiple boxes separated by '|'
-                                    # Format: "x1,y1,x2,y2|x1,y1,x2,y2,timestamp"
-                                    box_strs = mobile_box.split("|")
-                                    
-                                    accumulated_mask = None
-                                    last_box_coords = None # For persisting last view
-                                    
-                                    for b_str in box_strs:
-                                        params = b_str.split(",")
-                                        if len(params) < 4: continue
-                                        
-                                        # Extract coords 
-                                        x1, y1, x2, y2 = float(params[0]), float(params[1]), float(params[2]), float(params[3])
-                                        
-                                        # Convert Canvas Coords -> Image Coords
-                                        # Use existing context variables
-                                        real_x1 = int(x1 / scale_factor) + start_x
-                                        real_y1 = int(y1 / scale_factor) + start_y
-                                        real_x2 = int(x2 / scale_factor) + start_x
-                                        real_y2 = int(y2 / scale_factor) + start_y
-                                        
-                                        final_box = [real_x1, real_y1, real_x2, real_y2]
-                                        last_box_coords = final_box
 
-                                        # SAM Prediction
-                                        # Assuming 'sam' is the SAM predictor object
-                                        if not getattr(sam, "is_image_set", False): sam.set_image(st.session_state["image"])
-                                        mask = sam.generate_mask(
-                                            box_coords=final_box,
-                                            level=st.session_state.get("mask_level", 0),
-                                            is_wall_only=st.session_state.get("is_wall_only", False)
-                                        )
-                                        
-                                        if mask is not None:
-                                             if accumulated_mask is None: accumulated_mask = mask
-                                             else: accumulated_mask = np.logical_or(accumulated_mask, mask)
-
-                                    # Process final mask
-                                    if accumulated_mask is not None:
-                                        st.session_state["pending_selection"] = {'mask': accumulated_mask}
-                                        st.session_state["pending_box_coords"] = last_box_coords 
-                                        
-                                        # ⚡ AUTO-APPLY
-                                        cb_apply_pending()
-
-                                        st.session_state["render_id"] += 1
-                                        st.session_state["canvas_id"] = st.session_state.get("canvas_id", 0) + 1
-                                        
-                                        safe_rerun()
-                                    
-                                    st.query_params.pop("box", None)
-
-                                except Exception as e:
-                                    print(f"ERROR in mobile box: {e}")
                             
                             for p in raw_str.split(";"):
                                 if "," in p:
@@ -1279,11 +1245,13 @@ def render_sidebar(sam, device_str):
             # Use index parameter directly - don't set via session state before widget creation
             # This prevents Streamlit's "default value + Session State API" warning
             
+            radio_key = f"sidebar_tool_radio_{st.session_state.get('canvas_id', 0)}"
             st.radio("Method", tool_options, 
                                     index=tool_idx, 
                                     horizontal=True, 
-                                    key="sidebar_tool_radio",
-                                    on_change=cb_sidebar_tool_sync)
+                                    key=radio_key,
+                                    on_change=cb_sidebar_tool_sync,
+                                    args=(radio_key,))
             
             # DEBUG TRACE
             if "selection_tool" in st.session_state:

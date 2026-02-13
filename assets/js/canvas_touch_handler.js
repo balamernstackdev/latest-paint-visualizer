@@ -1,6 +1,6 @@
 /**
  * Canvas Responsive Scaling and Touch Handler
- * Multi-Box Professional Mobile Editor
+ * Multi-Box Professional Mobile Editor with Streamlit-Like UI
  */
 
 (function () {
@@ -44,6 +44,7 @@
         const now = Date.now();
         if (now - lastHistoryCall < 50) return false;
         parent.history.replaceState({}, '', url.toString());
+        try { parent.dispatchEvent(new Event('popstate')); } catch (e) { }
         lastHistoryCall = now;
         return true;
     };
@@ -53,23 +54,39 @@
         if (window.lastRerunTrigger && (now - window.lastRerunTrigger < 400)) return;
         window.lastRerunTrigger = now;
         setTimeout(() => {
-            const globalMarker = parent.document.querySelector('[data-sync-id="global_sync"]');
-            if (globalMarker) {
-                const globalBtn = globalMarker.closest('div[data-testid="stVerticalBlock"]').querySelector('button');
-                if (globalBtn) { globalBtn.click(); return; }
+            // Robust Text-Based Search for the Sync Button
+            const buttons = Array.from(parent.document.querySelectorAll('button'));
+            const syncBtn = buttons.find(b => b.textContent && b.textContent.includes("GLOBAL SYNC"));
+
+            if (syncBtn) {
+                console.log("JS: Found Sync Button, clicking...");
+                syncBtn.click();
+            } else {
+                console.error("JS: Sync Button 'GLOBAL SYNC' NOT FOUND in parent document.");
+                // Fallback: Try searching for the marker's sibling if text fails (e.g. if text is hidden/empty)
+                const globalMarker = parent.document.querySelector('[data-sync-id="global_sync"]');
+                if (globalMarker) {
+                    // Try going up to block and finding *last* button
+                    const block = globalMarker.closest('[data-testid="stVerticalBlock"]');
+                    if (block) {
+                        const blockBtns = block.querySelectorAll('button');
+                        if (blockBtns.length > 0) blockBtns[blockBtns.length - 1].click();
+                    }
+                }
             }
         }, 50);
     };
 
     /**
      * Multi-Box Editor
-     * Supports multiple selections, deletion, and batch commit.
      */
     class BoxEditor {
         constructor() {
             this.overlay = null;
             this.toolbar = null;
             this.handles = []; // DOM elements
+            this.handleContainer = null;
+            this.boxContainer = null;
 
             this.boxes = []; // Array of {x,y,w,h}
             this.selectedIndex = -1;
@@ -81,18 +98,13 @@
             this.startY = 0;
             this.startBox = null;
 
-            this.initOverlay();
+            this.currentWrapper = null; // Track attachment
+
+            this.createDOM();
         }
 
-        initOverlay() {
-            const iframe = getActiveIframe();
-            if (!iframe) return;
-            const wrapper = iframe.parentElement;
-            if (!wrapper) return;
-
-            // Cleanup
-            let existing = wrapper.querySelector('#box-editor-overlay');
-            if (existing) existing.remove();
+        createDOM() {
+            // Remove existing toolbar
             let existingBar = parent.document.getElementById('box-editor-fixed-toolbar');
             if (existingBar) existingBar.remove();
 
@@ -113,11 +125,11 @@
             this.boxContainer = parent.document.createElement('div');
             Object.assign(this.boxContainer.style, {
                 position: 'absolute', top: '0', left: '0', width: '100%', height: '100%',
-                pointerEvents: 'none' // Box elements will be added here
+                pointerEvents: 'none'
             });
             this.overlay.appendChild(this.boxContainer);
 
-            // Handles Container (Always on top)
+            // Handles Container
             this.handleContainer = parent.document.createElement('div');
             Object.assign(this.handleContainer.style, {
                 position: 'absolute', top: '0', left: '0', width: '100%', height: '100%',
@@ -126,14 +138,14 @@
             });
             this.overlay.appendChild(this.handleContainer);
 
-            // Pre-create Handles (Reusable)
+            // Pre-create Handles (24px)
             const positions = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
             positions.forEach(pos => {
                 const h = parent.document.createElement('div');
                 h.dataset.handle = pos;
                 Object.assign(h.style, {
                     position: 'absolute',
-                    width: '32px', height: '32px',
+                    width: '24px', height: '24px',
                     backgroundColor: '#FFFFFF',
                     border: '2px solid #FF4B4B',
                     borderRadius: '50%',
@@ -149,69 +161,103 @@
                 this.handles.push(h);
             });
 
-            wrapper.appendChild(this.overlay);
-
-            // Toolbar
+            // Toolbar (Flow Layout below Image)
             this.toolbar = parent.document.createElement('div');
-            this.toolbar.id = 'box-editor-fixed-toolbar';
+            this.toolbar.id = 'box-editor-flow-toolbar';
             Object.assign(this.toolbar.style, {
-                position: 'fixed',
-                bottom: '24px',
-                left: '50%',
-                transform: 'translateX(-50%)',
-                zIndex: '1000000',
                 display: 'none',
-                gap: '16px',
-                padding: '12px 24px',
-                background: 'rgba(255, 255, 255, 0.95)',
-                backdropFilter: 'blur(8px)',
-                borderRadius: '32px',
-                boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
-                border: '1px solid rgba(0,0,0,0.1)'
+                gap: '12px',
+                padding: '16px 0', // Vertical spacing
+                background: 'transparent',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: '100%',
+                pointerEvents: 'auto',
+                flexDirection: 'row',
+                position: 'relative',
+                zIndex: '2000'
             });
 
-            const btnStyle = "width: 48px; height: 48px; border-radius: 50%; border: none; font-size: 24px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: transform 0.1s; flex-shrink: 0;";
+            // Streamlit-like Button Style
+            const btnBase = `
+                display: flex; align-items: center; justify-content: center; gap: 8px;
+                height: 44px; padding: 0 24px; min-width: 120px;
+                border-radius: 8px; font-family: "Source Sans Pro", sans-serif; font-weight: 600; font-size: 16px;
+                cursor: pointer; transition: all 0.2s;
+                border: 1px solid rgba(49, 51, 63, 0.2);
+                background: white;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            `;
 
-            // Delete Selected
+            // Delete
             const btnDelete = parent.document.createElement('button');
-            btnDelete.innerHTML = "🗑️";
-            btnDelete.style.cssText = btnStyle + "background: #F3F4F6; color: #4B5563;";
+            btnDelete.innerHTML = "🗑️ Delete";
+            btnDelete.style.cssText = btnBase + "color: #333;"; // Standard text color
+            btnDelete.title = "Delete Selected";
             const curDelete = (e) => { e.preventDefault(); e.stopPropagation(); this.deleteSelected(); };
             btnDelete.onclick = curDelete;
             btnDelete.ontouchend = curDelete;
 
-            // Apply All
+            // Apply
             const btnApply = parent.document.createElement('button');
-            btnApply.innerHTML = "✅";
-            btnApply.style.cssText = btnStyle + "background: #10B981; color: white; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);";
+            btnApply.innerHTML = "✅ Apply";
+            btnApply.style.cssText = btnBase + "border-color: #10B981; color: #10B981; background: #F0FDF4;"; // Green accent
+            btnApply.title = "Apply Paint";
             const curApply = (e) => { e.preventDefault(); e.stopPropagation(); this.commit(); };
             btnApply.onclick = curApply;
             btnApply.ontouchend = curApply;
 
             this.toolbar.appendChild(btnDelete);
             this.toolbar.appendChild(btnApply);
-            parent.document.body.appendChild(this.toolbar);
 
-            // Events
+            // Initial mount check will handle insertion
+
+            // Bind Events strictly
             this.overlay.onpointerdown = this.onPointerDown.bind(this);
             this.overlay.onpointermove = this.onPointerMove.bind(this);
             this.overlay.onpointerup = this.onPointerUp.bind(this);
             this.overlay.onpointercancel = this.onPointerUp.bind(this);
         }
 
+        mount() {
+            const iframe = getActiveIframe();
+            if (!iframe) return;
+            const wrapper = iframe.parentElement;
+            if (!wrapper) return;
+
+            // 1. Overlay (inside wrapper)
+            if (this.currentWrapper !== wrapper || !this.overlay.isConnected) {
+                const stale = wrapper.querySelector('#box-editor-overlay');
+                if (stale && stale !== this.overlay) stale.remove();
+                wrapper.appendChild(this.overlay);
+                this.currentWrapper = wrapper;
+            }
+
+            // 2. Toolbar (AFTER wrapper, in flow)
+            // Ensure toolbar is the immediate next sibling
+            if (wrapper.nextElementSibling !== this.toolbar) {
+                // If it's elsewhere, move it. If not attached, attach it.
+                wrapper.after(this.toolbar);
+            }
+        }
+
         checkMode() {
+            this.mount();
+
             let mode = 'point';
             if (window.CANVAS_CONFIG && window.CANVAS_CONFIG.DRAWING_MODE) mode = window.CANVAS_CONFIG.DRAWING_MODE;
 
             if (mode === 'rect') {
                 this.overlay.style.display = 'block';
+                // Show toolbar if boxes exist -> actually user might want to commit empty? no.
+                if (this.boxes.length > 0) this.toolbar.style.display = 'flex';
+                else this.toolbar.style.display = 'none';
             } else {
                 this.overlay.style.display = 'none';
+                this.toolbar.style.display = 'none';
                 this.boxes = [];
                 this.selectedIndex = -1;
                 this.updateDOM();
-                // We do NOT clear URL param here to allow persistence, but for strict mode maybe we should?
-                // For now, let's just hide overlay.
             }
         }
 
@@ -243,7 +289,6 @@
             }
 
             // 2. Check Box Click (Any Box)
-            // Traverse reverse to select top-most
             for (let i = this.boxes.length - 1; i >= 0; i--) {
                 const b = this.boxes[i];
                 if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) {
@@ -254,7 +299,7 @@
                     this.startX = e.clientX;
                     this.startY = e.clientY;
                     this.startBox = { ...b };
-                    this.updateDOM(); // Update Highlight
+                    this.updateDOM();
                     return;
                 }
             }
@@ -266,11 +311,10 @@
             this.startX = x;
             this.startY = y;
 
-            // Create new box
             const newBox = { x, y, w: 0, h: 0 };
             this.boxes.push(newBox);
             this.selectedIndex = this.boxes.length - 1;
-            this.startBox = newBox; // Reference
+            this.startBox = newBox;
 
             this.updateDOM();
         }
@@ -285,28 +329,22 @@
 
             if (this.isDrawing) {
                 const b = this.boxes[this.selectedIndex];
-
                 const minX = Math.min(this.startX, x);
                 const minY = Math.min(this.startY, y);
                 const w = Math.abs(x - this.startX);
                 const h = Math.abs(y - this.startY);
-
                 const clampX = Math.max(0, Math.min(minX, rect.width - w));
                 const clampY = Math.max(0, Math.min(minY, rect.height - h));
-
                 b.x = minX; b.y = minY; b.w = w; b.h = h;
             }
             else if (this.isMoving) {
                 const dx = e.clientX - this.startX;
                 const dy = e.clientY - this.startY;
                 const b = this.boxes[this.selectedIndex];
-
                 let nx = this.startBox.x + dx;
                 let ny = this.startBox.y + dy;
-
                 nx = Math.max(0, Math.min(nx, rect.width - this.startBox.w));
                 ny = Math.max(0, Math.min(ny, rect.height - this.startBox.h));
-
                 b.x = nx; b.y = ny;
             }
             else if (this.activeHandle) {
@@ -314,7 +352,6 @@
                 const dy = e.clientY - this.startY;
                 const b = this.boxes[this.selectedIndex];
                 const sb = this.startBox;
-
                 let nx = sb.x, ny = sb.y, nw = sb.w, nh = sb.h;
 
                 if (this.activeHandle.includes('e')) nw = sb.w + dx;
@@ -338,7 +375,6 @@
             this.isMoving = false;
             this.activeHandle = null;
 
-            // Validate tiny boxes
             if (this.selectedIndex !== -1) {
                 const b = this.boxes[this.selectedIndex];
                 if (b.w < 10 || b.h < 10) {
@@ -350,8 +386,7 @@
         }
 
         updateDOM() {
-            // Render Boxes
-            this.boxContainer.innerHTML = ''; // Rebuild
+            this.boxContainer.innerHTML = '';
 
             this.boxes.forEach((b, idx) => {
                 const el = parent.document.createElement('div');
@@ -364,14 +399,13 @@
                     border: isSelected ? '2px solid #FF4B4B' : '2px solid rgba(255, 75, 75, 0.4)',
                     boxShadow: isSelected ? '0 0 0 1px white, 0 4px 8px rgba(0,0,0,0.2)' : 'none',
                     backgroundColor: isSelected ? 'rgba(255, 75, 75, 0.1)' : 'rgba(255, 75, 75, 0.05)',
-                    pointerEvents: 'auto', // Allow clicking
+                    pointerEvents: 'auto',
                     cursor: 'move'
                 });
                 el.dataset.index = idx;
                 this.boxContainer.appendChild(el);
             });
 
-            // Handles
             if (this.selectedIndex !== -1) {
                 const b = this.boxes[this.selectedIndex];
                 const map = {
@@ -393,7 +427,6 @@
                 this.handleContainer.style.display = 'none';
             }
 
-            // Toolbar
             if (this.boxes.length > 0) {
                 this.toolbar.style.display = 'flex';
             } else {
@@ -403,11 +436,11 @@
 
         commit() {
             if (this.boxes.length === 0) return;
+            console.log("JS: Committing boxes...", this.boxes);
 
             const rect = this.overlay.getBoundingClientRect();
             const scale = CANVAS_WIDTH / rect.width;
 
-            // Serialize all boxes
             const parts = this.boxes.map(b => {
                 const cx1 = Math.round(b.x * scale);
                 const cy1 = Math.round(b.y * scale);
@@ -417,15 +450,20 @@
             });
 
             const val = parts.join('|') + ',' + Date.now();
+            console.log("JS: Box param val:", val);
 
             const url = new URL(parent.location.href);
             url.searchParams.set('box', val);
             url.searchParams.delete('tap');
 
             throttledReplaceState(url);
-            triggerRerun();
 
-            // Clear boxes after commit (Application will take over)
+            // Delay rerun significantly to ensure URL update propagates
+            setTimeout(() => {
+                console.log("JS: Triggering Rerun");
+                triggerRerun();
+            }, 500);
+
             this.boxes = [];
             this.selectedIndex = -1;
             this.updateDOM();

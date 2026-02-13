@@ -7,6 +7,8 @@ import os
 import torch
 import warnings
 import logging
+import numpy as np
+import cv2
 
 # 🎯 CRITICAL: Must be the VERY FIRST Streamlit command
 st.set_page_config(
@@ -15,6 +17,18 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# --- UTILITIES IMPORT ---
+from utils.encoding import image_to_url_patch
+from utils.sam_loader import get_sam_engine, ensure_model_exists, CHECKPOINT_PATH, MODEL_TYPE
+from utils.state_manager import initialize_session_state, cb_apply_pending
+from utils.ui_components import setup_styles, render_sidebar, render_visualizer_engine_v11, TOOL_MAPPING
+from utils.image_processing import get_crop_params
+from config.constants import PerformanceConfig
+
+# --- 1️⃣ SESSION INITIALIZATION (VERY TOP) ---
+initialize_session_state()
+
 # --- WARNING SHIELD: Titanium Silence v4 ---
 st.components.v1.html("""
     <script>
@@ -46,57 +60,9 @@ st.components.v1.html("""
     </script>
 """, height=0)
 
-# --- UTILITIES IMPORT ---
-from utils.encoding import image_to_url_patch
-from utils.sam_loader import get_sam_engine, ensure_model_exists, CHECKPOINT_PATH, MODEL_TYPE
-from utils.state_manager import initialize_session_state
-from utils.ui_components import setup_styles, render_sidebar, render_visualizer_engine_v11
-from config.constants import PerformanceConfig
-
-# --- MONKEY PATCHING ---
-# Create spoof modules for older/newer Streamlit library structures
-for mod_name in ["streamlit.elements.lib", "streamlit.elements.lib.image_utils"]:
-    if mod_name not in sys.modules:
-        m = types.ModuleType(mod_name)
-        m.image_to_url = image_to_url_patch
-        sys.modules[mod_name] = m
-try:
-    import streamlit.elements.lib as sel
-    sel.image_utils = sys.modules["streamlit.elements.lib.image_utils"]
-except Exception as e:
-    # Monkey patching failed - may affect image display
-    import logging
-    logging.warning(f"Failed to patch streamlit.elements.lib: {e}")
-
-# Patch the standard image module immediately
-import streamlit.elements.image as st_image
-st_image.image_to_url = image_to_url_patch
-
-# --- FRAGMENT BACKWARD COMPATIBILITY ---
-if not hasattr(st, 'fragment'):
-    if hasattr(st, 'experimental_fragment'): st.fragment = st.experimental_fragment
-    else:
-        def fragment_noop(func=None, **kwargs):
-            if func is None: return lambda f: f
-            return func
-        st.fragment = fragment_noop
-
-# --- WARNING SHIELD ---
-warnings.filterwarnings("ignore", category=FutureWarning)
-warnings.filterwarnings("ignore", category=UserWarning)
-logging.getLogger("timm").setLevel(logging.ERROR)
-logging.getLogger("mobile_sam").setLevel(logging.ERROR)
-
-# --- RESOURCES ---
-os.environ["OMP_NUM_THREADS"] = str(PerformanceConfig.OMP_NUM_THREADS)
-os.environ["MKL_NUM_THREADS"] = str(PerformanceConfig.MKL_NUM_THREADS)
-torch.set_num_threads(PerformanceConfig.TORCH_NUM_THREADS)
-torch.set_grad_enabled(False)
-torch.backends.cudnn.benchmark = False
-
 def main():
     setup_styles()
-    initialize_session_state()
+    
     # Reset loop guard for the new app cycle
     st.session_state["loop_guarded"] = False
     ensure_model_exists()
@@ -106,12 +72,109 @@ def main():
     if torch.cuda.is_available(): device_str = "cuda"
     elif torch.backends.mps.is_available(): device_str = "mps"
 
+    # Load SAM early
     sam = get_sam_engine(CHECKPOINT_PATH, MODEL_TYPE)
-    q_params = st.query_params
-    print(f"DEBUG: APP RERUN - Tool: {st.session_state.get('selection_tool')}, Params: {list(q_params.keys())}")
-    
-    render_sidebar(sam, device_str)
 
+    # --- 2️⃣ CAPTURE BOX PARAM IMMEDIATELY (BEFORE SIDEBAR) ---
+    q_params = st.query_params
+    box_param = q_params.get("box", None)
+    
+    print(f"DEBUG: ALL PARAMS AT START: {dict(q_params)}")
+    
+    # --- 3️⃣ PROCESS BOX SEGMENTATION IMMEDIATELY ---
+    if box_param and st.session_state.get("image") is not None:
+        print(f"DEBUG: BOX PARAM DETECTED -> {box_param}")
+        
+        try:
+            # Parse Timestamp (Suffix)
+            if "," in box_param:
+                timestamp = box_param.split(",")[-1] 
+                # boxes_str is everything before the last comma
+                # If there are multiple boxes separate by |, the timestamp is at the very end
+                # Format: x,y,x,y|x,y,x,y,TIMESTAMP
+                parts = box_param.split(",")
+                if len(parts[-1]) > 9 and parts[-1].isdigit(): # Simple timestamp check
+                     boxes_str = box_param[:-(len(parts[-1])+1)]
+                else: 
+                     boxes_str = box_param
+            else:
+                boxes_str = box_param
+            
+            # Replicate View/Scale Logic to map Canvas -> Image
+            img = st.session_state["image"]
+            h, w = img.shape[:2]
+            display_width = 800
+            
+            zoom = st.session_state.get("zoom_level", 1.0)
+            pan_x = st.session_state.get("pan_x", 0.5)
+            pan_y = st.session_state.get("pan_y", 0.5)
+            
+            # USE CENTRALIZED LOGIC
+            start_x, start_y, view_w, view_h = get_crop_params(w, h, zoom, pan_x, pan_y)
+            
+            scale_factor = display_width / view_w
+            
+            # Process Boxes
+            accumulated_mask = None
+            
+            for b_token in boxes_str.split("|"):
+                if not b_token.strip(): continue
+                coords = list(map(float, b_token.split(",")))
+                if len(coords) == 4:
+                    cx1, cy1, cx2, cy2 = coords
+                    x1 = int(cx1 / scale_factor) + start_x
+                    y1 = int(cy1 / scale_factor) + start_y
+                    x2 = int(cx2 / scale_factor) + start_x
+                    y2 = int(cy2 / scale_factor) + start_y
+                    
+                    final_box = [min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2)]
+                    
+                    if not getattr(sam, "is_image_set", False): sam.set_image(img)
+                    mask = sam.generate_mask(box_coords=final_box, level=st.session_state.get("mask_level", 0), is_wall_only=st.session_state.get("is_wall_only", False))
+                    
+                    print(f"DEBUG: MASK GENERATED -> Box: {final_box}, Mask Sum: {np.sum(mask) if mask is not None else 'None'}")
+                    
+                    if mask is not None:
+                        if accumulated_mask is None: accumulated_mask = mask
+                        else: accumulated_mask = np.logical_or(accumulated_mask, mask)
+            
+            if accumulated_mask is not None:
+                # Store in pending so cb_apply_pending can pick it up or apply directly?
+                # The user said: "Apply paint using alpha blending... Store result... Set session_state.mask"
+                # To adhere to the existing architecture where masks are accumulated in st.session_state["masks"], 
+                # we will manually construct the mask entry and append it.
+                
+                print("DEBUG: PAINT APPLIED (Adding to State)")
+                new_mask_entry = {
+                    'mask': accumulated_mask,
+                    'color': st.session_state.get("picked_color", "#8FBC8F"),
+                    'visible': True,
+                    'name': f"Layer {len(st.session_state['masks'])+1}",
+                    'refinement': 0,
+                    'softness': st.session_state.get("selection_softness", 0),
+                    'brightness': 0.0, 'contrast': 1.0, 'saturation': 1.0, 'hue': 0.0, 
+                    'opacity': st.session_state.get("selection_highlight_opacity", 1.0), 
+                    'finish': st.session_state.get("selection_finish", 'Standard')
+                }
+                
+                # Directly append to avoid cb overhead or dependency on UI state
+                st.session_state["masks"].append(new_mask_entry)
+                st.session_state["render_id"] += 1
+                st.toast("✅ Paint Applied!", icon="🎨")
+            else:
+                print("DEBUG: ⚠️ SAM returned None in Early Processor")
+                st.toast("⚠️ No object detected.", icon="🤷‍♂️")
+            
+        except Exception as e:
+            print(f"DEBUG: Early Processor Error: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        # Clear param to prevent loop (Step 2 requirement)
+        if "box" in st.query_params:
+            st.query_params.pop("box", None)
+            
+    # --- 4️⃣ RENDER IMAGE ---
     if st.session_state.get("image") is not None:
         render_visualizer_engine_v11(800)
     else:
@@ -130,6 +193,10 @@ def main():
             </div>
             """, unsafe_allow_html=True)
             st.info("👈 Use the sidebar to upload an image.")
+
+    # --- 5️⃣ RENDER SIDEBAR LAST ---
+    print("DEBUG: SIDEBAR RENDER")
+    render_sidebar(sam, device_str)
 
     # --- 🤖 HIDDEN TECHNICAL BRIDGE (Bottom of script) ---
     st.markdown('<div id="global-sync-anchor"></div>', unsafe_allow_html=True)
