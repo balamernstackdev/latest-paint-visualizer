@@ -115,9 +115,16 @@ def estimate_memory_usage() -> Dict[str, float]:
     
     # Estimate mask memory
     if "masks" in st.session_state:
+        from scipy import sparse
         for mask_data in st.session_state["masks"]:
             if "mask" in mask_data and mask_data["mask"] is not None:
-                usage["masks"] += mask_data["mask"].nbytes / (1024 * 1024)
+                m = mask_data["mask"]
+                if sparse.issparse(m):
+                    # Sparse matrix size is data + indices + pointers
+                    size = (m.data.nbytes + m.indices.nbytes + m.indptr.nbytes)
+                    usage["masks"] += size / (1024 * 1024)
+                else:
+                    usage["masks"] += m.nbytes / (1024 * 1024)
     
     # Estimate cache memory (approximation)
     cache_count = sum(

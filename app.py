@@ -23,7 +23,7 @@ from utils.encoding import image_to_url_patch
 from utils.sam_loader import get_sam_engine, ensure_model_exists, CHECKPOINT_PATH, MODEL_TYPE
 from utils.state_manager import initialize_session_state, cb_apply_pending
 from utils.ui_components import setup_styles, render_sidebar, render_visualizer_engine_v11, TOOL_MAPPING
-from utils.image_processing import get_crop_params
+from utils.image_processing import get_crop_params, magic_wand_selection
 from config.constants import PerformanceConfig
 
 # --- 1️⃣ SESSION INITIALIZATION (VERY TOP) ---
@@ -223,20 +223,35 @@ def main():
                 real_x = int(x / scale_factor) + start_x
                 real_y = int(y / scale_factor) + start_y
 
-                # 2. SAM Segmentation
-                if not getattr(sam, "is_image_set", False): sam.set_image(img)
-                mask = sam.generate_mask(
-                    point_coords=[real_x, real_y], 
-                    level=st.session_state.get("mask_level", 0), 
-                    is_wall_only=st.session_state.get("is_wall_only", False)
-                )
+                # 2. SELECTION LOGIC BRANCH
+                tool_mode = st.session_state.get("selection_tool", "")
+                
+                if "Magic Wand" in tool_mode:
+                    print(f"DEBUG: Magic Wand Selection at ({real_x},{real_y})")
+                    mask = magic_wand_selection(
+                        st.session_state["image"], 
+                        (real_x, real_y), 
+                        tolerance=st.session_state.get("wand_tolerance", 25)
+                    )
+                else:
+                    # Default: SAM Segmentation (AI Click)
+                    if not getattr(sam, "is_image_set", False): sam.set_image(img)
+                    mask = sam.generate_mask(
+                        point_coords=[real_x, real_y], 
+                        level=st.session_state.get("mask_level", 0), 
+                        is_wall_only=st.session_state.get("is_wall_only", False)
+                    )
 
                 if mask is not None:
                     # 3. Apply Instantly
                     st.session_state["pending_selection"] = {'mask': mask, 'point': (real_x, real_y)}
+                    
+                    # Set Op for Magic Wand (default to sidebar op if not eraser)
+                    st.session_state["selection_op"] = st.session_state.get("sidebar_op_radio", "Add")
+                    
                     cb_apply_pending(increment_canvas=False, silent=True) # Stable Canvas Key
                     st.session_state["render_id"] += 1
-                    print(f"DEBUG: Top-Level Tap Success at ({real_x},{real_y})")
+                    print(f"DEBUG: Top-Level Tap Success at ({real_x},{real_y}) using mode: {tool_mode}")
         
         except Exception as tap_err:
             print(f"DEBUG: Top-Level Tap Error: {tap_err}")

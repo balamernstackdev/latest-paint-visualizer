@@ -21,7 +21,10 @@ from .sam_loader import get_sam_engine, CHECKPOINT_PATH, MODEL_TYPE
 TOOL_MAPPING = {
     "👆": "👆 AI Click (Point)",
     "✨": "✨ AI Object (Box)",
-    "🕸️": "🕸️ Polygonal Lasso"
+    "🕸️": "🕸️ Polygonal Lasso",
+    "✏️": "✏️ Paint Brush",
+    "🧹": "🧹 Eraser",
+    "🪄": "🪄 Magic Wand"
 }
 
 # --- HELPERS ---
@@ -72,6 +75,9 @@ def cb_sidebar_tool_sync(widget_key=None):
         st.session_state["loop_guarded"] = False
         st.session_state["force_finish_poly"] = False
         st.session_state["loop_guarded"] = False
+        
+        # Reset operation to "Add" on any tool switch
+        st.session_state["selection_op"] = "Add"
         
         # FIX: Defer JS clearing to the render loop to avoid callback reruns
         st.session_state["tool_switched_reset"] = True
@@ -709,7 +715,7 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
         drawing_mode=drawing_mode, initial_drawing=initial_drawing, 
         point_display_radius=20 if drawing_mode in ["point", "freedraw", "polygon"] else 0,
         key=f"canvas_main_{st.session_state.get('canvas_id', 0)}", 
-        display_toolbar=False
+        display_toolbar=True
     )
 
     # 📱 JS Handler (Silent, no elements)
@@ -726,6 +732,9 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
         components.html(js_config, height=0)
 
     # 🔄 SYNC & PROCESS (Silent)
+    # DEBUG: Force log raw canvas return
+    print(f"DEBUG: Canvas Render -> Tool: {drawing_mode}, Return: {canvas_result.json_data is not None}, Object Count: {len(canvas_result.json_data.get('objects', [])) if canvas_result.json_data else 0}")
+    
     if canvas_result.json_data:
         json_data = canvas_result.json_data
         st.session_state["canvas_raw"] = json_data
@@ -744,6 +753,7 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
         tool_mode = st.session_state.get("selection_tool", "✨ AI Object (Box)")
         
         if objects:
+            print(f"DEBUG: Canvas Process -> Mode: {tool_mode}, Objects: {len(objects)} Types: {[o.get('type') for o in objects]}")
             if "AI Click" in tool_mode:
                 for obj in reversed(objects):
                     if obj["type"] in ["circle", "path"]:
@@ -976,6 +986,77 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                                 safe_rerun()
                 except Exception as e: logging.error(f"Poly Error: {e}")
                 
+
+            
+            # --- 🪄 BRUSH & ERASER TOOLS ---
+            elif "Paint Brush" in tool_mode or "Eraser" in tool_mode:
+                for obj in reversed(objects):
+                    if obj["type"] == "path":
+                        # Convert canvas path to mask
+                        # Assuming freehand paths have command format
+                        path_data = obj.get("path", [])
+                        if path_data:
+                            # Parse complex path command list
+                            scaled_path = []
+                            for cmd in path_data:
+                                if len(cmd) > 1:
+                                    scaled_cmd = [cmd[0]]
+                                    # Scale coordinates
+                                    for i in range(1, len(cmd), 2):
+                                        scaled_cmd.append(int(cmd[i] / scale_factor) + start_x)
+                                        scaled_cmd.append(int(cmd[i+1] / scale_factor) + start_y)
+                                    scaled_path.append(scaled_cmd)
+                            
+                            # Use existing path processor but enforce STROKE rendering
+                            from .image_processing import process_lasso_path
+                            stroke_width = st.session_state.get("lasso_thickness", 20)
+                            
+                            # Render the stroke into a mask
+                            mask = process_lasso_path(scaled_path, w, h, thickness=stroke_width, fill=False)
+                            
+                            print(f"DEBUG: Found Path - Cmds:{len(scaled_path)} Thickness:{stroke_width} MaskSum:{mask.sum()}")
+                           
+                            if mask.any():
+                                st.session_state["pending_selection"] = {'mask': mask}
+                                
+                                # Set operation mode
+                                if "Eraser" in tool_mode:
+                                     st.session_state["selection_op"] = "Subtract"
+                                     st.session_state["sidebar_op_radio"] = "Subtract"
+                                else:
+                                     st.session_state["selection_op"] = "Add"
+                                     st.session_state["sidebar_op_radio"] = "Add"
+                                     
+                                cb_apply_pending()
+                                st.session_state["canvas_id"] = st.session_state.get("canvas_id", 0) + 1
+                                st.session_state["render_id"] += 1
+                                safe_rerun()
+                        break 
+
+            # --- 🪄 MAGIC WAND TOOL ---
+            elif "Magic Wand" in tool_mode:
+                 for obj in reversed(objects):
+                    if obj["type"] in ["circle", "path"]: # Handle click as circle
+                         rel_x, rel_y = obj["left"], obj["top"]
+                         real_x, real_y = int(rel_x / scale_factor) + start_x, int(rel_y / scale_factor) + start_y
+                         
+                         click_key = f"{real_x}_{real_y}_wand"
+                         if click_key != st.session_state.get("last_click_global"):
+                             st.session_state["last_click_global"] = click_key
+                             
+                             from .image_processing import magic_wand_selection
+                             mask = magic_wand_selection(st.session_state["image"], (real_x, real_y), tolerance=20)
+                             
+                             if mask is not None and mask.any():
+                                 st.session_state["pending_selection"] = {'mask': mask}
+                                 st.session_state["selection_op"] = "Add" # Default to Add
+                                 
+                                 cb_apply_pending()
+                                 st.session_state["canvas_id"] = st.session_state.get("canvas_id", 0) + 1
+                                 st.session_state["render_id"] += 1
+                                 safe_rerun()
+                         break
+
             # --- PENDING SELECTION ACTIONS (Inside Fragment) ---
             if st.session_state.get("pending_selection") is not None:
                 st.toast("✨ Selection Ready! Apply or Cancel below 👇", icon="🎨")
@@ -1057,7 +1138,9 @@ def render_visualizer_engine_v11(display_width):
     if "AI Click" in tool_mode: drawing_mode = "point"
     elif "AI Object" in tool_mode: drawing_mode = "rect" if st.session_state.get("ai_drag_sub_tool") == "🆕 Draw New" else "transform"
     elif "Lasso" in tool_mode and "Polygonal" not in tool_mode: drawing_mode = "freedraw"
+    elif "Paint Brush" in tool_mode or "Eraser" in tool_mode: drawing_mode = "freedraw"
     elif "Polygonal" in tool_mode: drawing_mode = "polygon"
+    elif "Magic Wand" in tool_mode: drawing_mode = "point"
     else: drawing_mode = "transform"
     
     render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_w, view_h, scale_factor, h, w, drawing_mode)
@@ -1162,11 +1245,19 @@ def render_sidebar(sam, device_str):
                         oh, ow = original_img.shape[:2]
                         high_res_masks = []
                         for m_data in st.session_state["masks"]:
+                            # 1. Prepare Mask
+                            raw_mask = m_data['mask']
+                            from scipy import sparse
+                            if sparse.issparse(raw_mask):
+                                raw_mask = raw_mask.toarray()
+                            
+                            # 2. Resize to full resolution
+                            mask_uint8 = (raw_mask * 255).astype(np.uint8)
+                            hr_mask_uint8 = cv2.resize(mask_uint8, (ow, oh), interpolation=cv2.INTER_NEAREST)
+                            
+                            # 3. Create high-res layer obj
                             hr_m = m_data.copy()
-                            mask_uint8 = (m_data['mask'] * 255).astype(np.uint8)
-                            hr_mask_uint8 = cv2.resize(mask_uint8, (ow, oh), interpolation=cv2.INTER_LINEAR)
                             hr_m['mask'] = hr_mask_uint8 > 127
-                            hr_m['mask_soft'] = None 
                             high_res_masks.append(hr_m)
                         from core.colorizer import ColorTransferEngine
                         dl_comp = ColorTransferEngine.composite_multiple_layers(original_img, high_res_masks)
@@ -1210,11 +1301,18 @@ def render_sidebar(sam, device_str):
             if "selection_tool" in st.session_state:
                 print(f"DEBUG: SIDEBAR RENDER -> Tool: {st.session_state['selection_tool']}, Radio Key: {radio_key}")
             
-            st.radio("Operation", ["Add", "Subtract"], 
-                                    horizontal=True, 
-                                    index=0 if st.session_state.get("selection_op") == "Add" else 1,
-                                    key="sidebar_op_radio",
-                                    on_change=cb_sidebar_op_sync)
+            # 🎯 HIDE OPERATION FOR BRUSH/ERASER (They have specific built-in ops)
+            if "Paint Brush" in current_tool:
+                st.session_state["selection_op"] = "Add"
+            elif "Eraser" in current_tool:
+                st.session_state["selection_op"] = "Subtract"
+
+            if "Paint Brush" not in current_tool and "Eraser" not in current_tool:
+                st.radio("Operation", ["Add", "Subtract"], 
+                                        horizontal=True, 
+                                        index=0 if st.session_state.get("selection_op") == "Add" else 1,
+                                        key="sidebar_op_radio",
+                                        on_change=cb_sidebar_op_sync)
             
             # --- Tool Specific Controls (Full Width) ---
             # --- Tool Specific Controls (Full Width) ---
@@ -1231,6 +1329,16 @@ def render_sidebar(sam, device_str):
                     safe_rerun()
                 # ⚡ Always Instant Apply
                 st.session_state["ai_click_instant_apply"] = True
+            
+            # --- 🎨 BRUSH & ERASER CONTROLS ---
+            elif "Paint Brush" in current_tool or "Eraser" in current_tool:
+                st.slider("Brush Size", 5, 200, 40, key="lasso_thickness", help="Adjust the thickness of your brush.")
+                st.caption("Draw freely on the image.")
+            
+            # --- 🪄 MAGIC WAND CONTROLS ---
+            elif "Magic Wand" in current_tool:
+                st.session_state["wand_tolerance"] = 25
+                st.caption("Click internally on a wall to fill it.")
 
             # 🎯 HIDE ACTION OPTIONS FOR AI OBJECT (BOX)
             # Force "Draw New" mode silently if AI Object is selected, but do not show the UI.

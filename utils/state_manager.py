@@ -76,19 +76,35 @@ def cb_apply_pending(increment_canvas=True, silent=False):
                 new_selection_mask = new_mask['mask']
 
                 # Iterate through ALL layers to erase from everything
+                # Iterate through ALL layers to erase from everything
                 for layer in st.session_state["masks"]:
                     if layer.get("visible", True):
                         target_mask = layer['mask']
                         
+                        # 🛡️ SAFE DECOMPRESSION: Convert to dense for boolean logic
+                        if sparse.issparse(target_mask):
+                            target_mask = target_mask.toarray()
+                        
                         # Resize if needed (safety check for consistency)
-                        if target_mask.shape != new_selection_mask.shape:
-                            resized_new = cv2.resize(new_selection_mask.astype(np.uint8), (target_mask.shape[1], target_mask.shape[0]), interpolation=cv2.INTER_NEAREST) > 0
+                        dense_new_sel = new_selection_mask
+                        if sparse.issparse(dense_new_sel):
+                            dense_new_sel = dense_new_sel.toarray()
+                            
+                        # Resize to match execution context
+                        if target_mask.shape != dense_new_sel.shape:
+                            resized_new = cv2.resize(dense_new_sel.astype(np.uint8), (target_mask.shape[1], target_mask.shape[0]), interpolation=cv2.INTER_NEAREST) > 0
                         else:
-                            resized_new = new_selection_mask
+                            resized_new = dense_new_sel
 
                         before_count = np.sum(target_mask)
-                        layer['mask'] = target_mask & ~resized_new
-                        after_count = np.sum(layer['mask'])
+                        
+                        # PERFORM SUBTRACTION (Dense Arrays)
+                        layer_mask = target_mask & ~resized_new
+                        
+                        # ⚡ RE-COMPRESS RESULT
+                        layer['mask'] = sparse.csc_matrix(layer_mask)
+                        
+                        after_count = np.sum(layer_mask)
                         
                         diff = before_count - after_count
                         total_removed += diff

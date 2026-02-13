@@ -508,7 +508,7 @@
             let mode = window.CANVAS_CONFIG?.DRAWING_MODE || 'point';
             this.mode = mode; // Store mode
 
-            if (mode === 'polygon' || mode === 'freedraw') {
+            if (mode === 'polygon') {
                 if (!this.mount()) return;
                 this.show();
                 this.render();

@@ -72,6 +72,8 @@ class SegmentationEngine:
         logger.info("Embeddings and features computed.")
 
     def generate_mask(self, point_coords=None, point_labels=None, box_coords=None, level=None, is_wall_only=False, cleanup=True):
+        print(f"DEBUG: Entering generate_mask v4.1 (Cleaned abs_edges)")
+        abs_edges = None # Safety init
         is_small_object = False # Initialize to prevent UnboundLocalError in Box Mode
         if self.predictor is None:
             return None
@@ -316,7 +318,6 @@ class SegmentationEngine:
                      # Use pre-computed edges
                      edge_barrier = 0
                      _, edge_barrier = cv2.threshold(self.image_edges_abs, SegmentationConfig.EDGE_THRESHOLD_BOX_MODE, 255, cv2.THRESH_BINARY_INV)
-                     _, edge_barrier = cv2.threshold(abs_edges, SegmentationConfig.EDGE_THRESHOLD_BOX_MODE, 255, cv2.THRESH_BINARY_INV) 
                      edge_barrier = (edge_barrier / 255).astype(np.uint8)
                      
                      mask_refined = (mask_uint8 & valid_mask & edge_barrier)
@@ -357,10 +358,8 @@ class SegmentationEngine:
                             
                             # 2. Edge Barrier: Catches strong edges while allowing texture detail.
                             # Use pre-computed
-                            abs_edges = self.image_edges_abs
-                            
                             edge_thresh = SegmentationConfig.EDGE_THRESHOLD_WALL_MODE if is_wall_only else SegmentationConfig.EDGE_THRESHOLD_SMALL_OBJECT
-                            _, edge_barrier = cv2.threshold(abs_edges, edge_thresh, 255, cv2.THRESH_BINARY_INV)
+                            _, edge_barrier = cv2.threshold(self.image_edges_abs, edge_thresh, 255, cv2.THRESH_BINARY_INV)
                             edge_barrier = (edge_barrier / 255).astype(np.uint8)
                             
                             mask_refined = (mask_uint8 & valid_mask & edge_barrier)
@@ -385,10 +384,8 @@ class SegmentationEngine:
                             valid_mask = (color_diff < tol).astype(np.uint8)
                             
                             # Edge detection: allows paint to flow over soft architectural edges but stops at strong object borders
-                            abs_edges = self.image_edges_abs
-                            
                             edge_thresh = SegmentationConfig.EDGE_THRESHOLD_WALL_MODE if is_wall_only else SegmentationConfig.EDGE_THRESHOLD_STANDARD_WALL
-                            _, edge_barrier = cv2.threshold(abs_edges, edge_thresh, 255, cv2.THRESH_BINARY_INV)
+                            _, edge_barrier = cv2.threshold(self.image_edges_abs, edge_thresh, 255, cv2.THRESH_BINARY_INV)
                             edge_barrier = (edge_barrier / 255).astype(np.uint8)
                             
                             mask_refined = (mask_uint8 & valid_mask & edge_barrier)

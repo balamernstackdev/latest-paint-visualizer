@@ -37,11 +37,19 @@ def composite_image(original_rgb, masks_data):
     processed_masks = []
     for m_data in visible_masks:
         m_copy = m_data.copy()
+        
+        # ⚡ OPTIMIZATION: Handle Sparse Masks
+        raw_mask = m_data['mask']
+        from scipy import sparse
+        if sparse.issparse(raw_mask):
+            raw_mask = raw_mask.toarray()
+        m_copy['mask'] = raw_mask # Store dense for processing
+
         ref = m_data.get('refinement', 0)
         if ref != 0:
             kernel_size = abs(ref) * 2 + 1
             kernel = np.ones((kernel_size, kernel_size), np.uint8)
-            mask_uint8 = m_data['mask'].astype(np.uint8) * 255
+            mask_uint8 = raw_mask.astype(np.uint8) * 255
             if ref > 0:
                 refined_mask = cv2.dilate(mask_uint8, kernel, iterations=1)
             else:
@@ -58,6 +66,8 @@ def composite_image(original_rgb, masks_data):
         pending = st.session_state.get("pending_selection")
         if pending is not None:
             mask = pending['mask']
+            # Decompress Pending if sparse (rare but possible)
+            if sparse.issparse(mask): mask = mask.toarray()
             pc = st.session_state.get("picked_color", "#3B82F6")
             try:
                 c_rgb = tuple(int(pc.lstrip('#')[i:i+2], 16) for i in (0, 2, 4))
@@ -116,3 +126,24 @@ def process_lasso_path(scaled_path, w, h, thickness=6, fill=False):
         print(f"Lasso Path processing error: {e}")
         
     return mask > 0
+
+
+def magic_wand_selection(image, seed_point, tolerance=10):
+    if image is None: return None
+    h, w = image.shape[:2]
+    
+    # Create mask compatible with floodFill (h+2, w+2)
+    mask = np.zeros((h+2, w+2), np.uint8)
+    
+    flags = 4 | (255 << 8) | cv2.FLOODFILL_FIXED_RANGE | cv2.FLOODFILL_MASK_ONLY
+    
+    lo_diff = (tolerance, tolerance, tolerance)
+    up_diff = (tolerance, tolerance, tolerance)
+    
+    try:
+        cv2.floodFill(image, mask, seed_point, (255, 255, 255), lo_diff, up_diff, flags)
+        return mask[1:-1, 1:-1] > 0
+    except Exception as e:
+        print(f'Magic Wand Error: {e}')
+        return None
+

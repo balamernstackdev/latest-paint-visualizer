@@ -1,51 +1,54 @@
-# Upgrade Recommendations: Performance & Features
+# Upgrade Roadmap: Phase 3 - "Pro" Features
 
-Based on the current state of your project (where **AI Model Quantization** and **Feature Pre-Computing** have already been implemented), here are the next steps to take your project to a production level.
+Great news! The core performance optimizations (**Sparse Masks, AI Quantization**) and visual upgrades (**Texture Mode**) are now **COMPLETE**.
 
-## 1. Remaining Performance Optimizations
+Your project is stable and fast. The next set of upgrades should focus on **User Control** and **Export Quality**.
 
-### **A. Sparse Mask Storage (Critical for Memory)**
-*   **Current State:** Masks are stored as full-resolution boolean arrays in `st.session_state`.
-*   **Problem:** If a user creates 10 layers on a 4K image, the browser tab will crash due to memory overload.
-*   **Upgrade:** Use `scipy.sparse.csc_matrix` to compress masks in memory.
-*   **Benefit:** Reduces RAM usage by ~90% for typical wall masks.
+## 1. Top Priority: User Control Features
 
-### **B. Async Mask Generation**
-*   **Current State:** The UI freezes while the AI is thinking (2-5 seconds on CPU).
-*   **Problem:** Bad user experience; users might click repeatedly thinking it's broken.
-*   **Upgrade:** Move `sam.generate_mask` to a background thread or use `streamlit.spinner` more effectively with caching.
-
-## 2. Missing "Production" Features
-
-### **A. Manual "Brush" Refinement (High Priority)**
-*   **Why:** AI isn't perfect. It often misses tiny corners or overspills onto the ceiling.
-*   **Feature:** Add a "Paintbrush / Eraser" tool that lets users manually fix the AI mask.
-*   **Implementation:** Use `streamlit-drawable-canvas` in "freedraw" mode to create a correction layer that is +added or -subtracted from the AI mask.
+### **A. Manual "Touch-up" Brush (Critical)**
+*   **The Problem:** AI is 95% perfect, but sometimes misses a corner or paints a light switch.
+*   **The Solution:** Add a manual "Brush" and "Eraser" tool.
+*   **How to Build:**
+    1.  Add a generic "Paint Brush" tool in the sidebar.
+    2.  When the user draws on the canvas, capture that path.
+    3.  **Add Mode:** Combine the drawn path with the current layer using `OR`.
+    4.  **Erase Mode:** Remove the drawn path using `AND NOT`.
 
 ### **B. Magic Wand Tool**
-*   **Why:** For simple flat walls (like a distinct blue wall), clicking once with a color-based selector is faster than AI.
-*   **Feature:** A "Magic Wand" tool using OpenCV's `floodFill` algorithm.
+*   **The Problem:** Painting a simple, solid-colored wall with AI feels like overkill and can be slow.
+*   **The Solution:** A classic "Magic Wand" like Photoshop.
+*   **How to Build:**
+    1.  Use OpenCV's `cv2.floodFill` algorithm.
+    2.  Input: Click point + Color Threshold (Tolerance).
+    3.  Output: A mask of all connected pixels with similar color.
 
-### **C. Realistic Rendering (Physics-Based)**
-*   **Why:** Currently, the paint looks "flat" because it just tints the pixels.
-*   **Feature:** Implement "Multiply" or "Overlay" blending modes that respect the texture and shadows of the original wall.
-*   **Advanced:** Use `LAB` color space (which you partly have) but add a "Lightness Slider" to let users simulate "Matte" vs "Glossy" finishes by adjusting the specular highlights.
+## 2. Top Priority: Output Quality
 
-### **D. High-Resolution Export**
-*   **Why:** Users work on a resized preview (e.g., 800px) for speed.
-*   **Feature:** 
-    1.  Store every "click" coordinate and "color" choice in a list.
-    2.  When the user clicks "Download High-Res":
-    3.  Load the original 4K image in the background.
-    4.  Re-run the segmentation on the 4K image using the stored clicks.
-    5.  Apply the paint and save.
+### **A. Smart High-Res Export**
+*   **The Problem:** Users are painting on a resized 800px preview. The download is currently low resolution.
+*   **The Solution:** "Replay" the paint job on the original 4K image during export.
+*   **How to Build:**
+    1.  Keep a log of all operations (e.g., `Layer 1: Box=[100, 200...], Color=#FF0000`).
+    2.  When user clicks "Download":
+    3.  Load `image_original` (hidden from UI).
+    4.  Scale all coordinates up (e.g., `x * 4`).
+    5.  Re-run the masking and coloring on the 4K image.
+    6.  Serve the high-res file.
 
-## 3. Workflow Enhancements
+## 3. Future Architecture Upgrade
 
-### **Undo/Redo System**
-*   **Current State:** Basic session state list.
-*   **Upgrade:** Implement a robust Command Pattern undo system that can handle complex actions like "Group selection" or "Batch delete".
+### **Async Background Processing**
+*   **The Problem:** The "Running..." spinner blocks the entire interface while the AI thinks.
+*   **The Solution:** Move the heavy AI work to a background thread.
+*   **How to Build:**
+    1.  Use `concurrent.futures.ThreadPoolExecutor`.
+    2.  Submit the `sam.generate_mask` task.
+    3.  Show a "Processing..." status indicator that polls for the result without freezing the UI buttons.
 
-### **Project Gallery**
-*   **Current State:** You have the database models (`Project`, `User`).
-*   **Upgrade:** Build a "My Projects" dashboard where users can see thumbnails of their past work and click to resume.
+## Summary Checklist
+- [x] Memory Optimization (Sparse Matrices)
+- [x] Realistic Texture Rendering
+- [ ] Manual Touch-up Tools
+- [ ] High-Res Export
+- [ ] Magic Wand
