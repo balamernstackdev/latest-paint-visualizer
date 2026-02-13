@@ -368,6 +368,7 @@ def main():
 
         if "poly_pts" in st.query_params:
              st.query_params.pop("poly_pts", None)
+        st.rerun()
             
     # --- 4️⃣ RENDER IMAGE ---
     if st.session_state.get("image") is not None:
