@@ -26,7 +26,7 @@ from utils.ui_components import setup_styles, render_sidebar, render_visualizer_
 from utils.image_processing import get_crop_params, magic_wand_selection
 from config.constants import PerformanceConfig
 
-# --- 1️⃣ SESSION INITIALIZATION (VERY TOP) ---
+# --- 1️⃣ SESSION INITIALIZATION (VERY TOP)
 initialize_session_state()
 
 # --- WARNING SHIELD: Titanium Silence v4 ---
