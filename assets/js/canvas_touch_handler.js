@@ -44,7 +44,7 @@
         const now = Date.now();
         if (now - lastHistoryCall < 50) return false;
         parent.history.replaceState({}, '', url.toString());
-        try { parent.dispatchEvent(new Event('popstate')); } catch (e) { }
+        // REMOVED popstate dispatch to avoid double-rerun race conditions with manual trigger
         lastHistoryCall = now;
         return true;
     };
@@ -72,7 +72,7 @@
                     }
                 }
             }
-        }, 500); // 500ms delay for stability
+        }, 200); // Reduced delay for faster first-click response
     };
 
     // Shared UI Button Style
@@ -676,13 +676,66 @@
         }
     }
 
+    class PointEditor extends BaseEditor {
+        constructor() {
+            super('point-editor');
+            this.lastTapTime = 0;
+            this.bindEvents();
+        }
+
+        bindEvents() {
+            this.overlay.onpointerdown = this.onPointerDown.bind(this);
+        }
+
+        checkMode() {
+            let mode = window.CANVAS_CONFIG?.DRAWING_MODE || 'point';
+            if (mode === 'point') {
+                if (this.mount()) {
+                    this.show();
+                }
+            } else {
+                this.hide();
+            }
+        }
+
+        onPointerDown(e) {
+            e.preventDefault();
+            e.stopPropagation();
+
+            const now = Date.now();
+            if (now - this.lastTapTime < 300) return; // Debounce
+            this.lastTapTime = now;
+
+            const rect = this.overlay.getBoundingClientRect();
+            const scale = (window.CANVAS_CONFIG?.CANVAS_WIDTH || 800) / rect.width;
+
+            const x = Math.round((e.clientX - rect.left) * scale);
+            const y = Math.round((e.clientY - rect.top) * scale);
+
+            console.log(`JS: Point tap at (${x}, ${y}) [Screen: ${Math.round(e.clientX - rect.left)}, ${Math.round(e.clientY - rect.top)}, Scale: ${scale.toFixed(2)}]`);
+
+            // Set URL parameter for Streamlit backend
+            const url = new URL(parent.location.href);
+            url.searchParams.set('tap', `${x},${y},${now}`);
+            url.searchParams.delete('box');
+            url.searchParams.delete('poly_pts');
+
+            // Trigger rerun immediately
+            if (throttledReplaceState(url)) {
+                triggerRerun();
+            }
+        }
+    }
+
     let boxEditor = new BoxEditor();
     let polyEditor = new PolygonEditor();
+    let pointEditor = new PointEditor();
 
     function mainLoop() {
         applyResponsiveScale();
         boxEditor.checkMode();
         polyEditor.checkMode();
+        pointEditor.checkMode();
     }
 
     // Start

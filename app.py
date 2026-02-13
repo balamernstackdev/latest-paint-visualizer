@@ -202,6 +202,49 @@ def main():
         if "box" in st.query_params:
             st.query_params.pop("box", None)
 
+    # --- 2c️⃣ CAPTURE & PROCESS TAP PARAM IMMEDIATELY ---
+    tap_param = q_params.get("tap", None)
+    if tap_param and st.session_state.get("image") is not None:
+        print(f"DEBUG: Processing Mobile Tap at Top Level -> {tap_param}")
+        try:
+            parts = tap_param.split(",")
+            if len(parts) >= 2:
+                # 1. Parse & Scale Coords
+                x, y = int(parts[0].strip()), int(parts[1].strip())
+                img = st.session_state["image"]
+                h, w = img.shape[:2]
+                display_width = 800
+                zoom = st.session_state.get("zoom_level", 1.0)
+                pan_x = st.session_state.get("pan_x", 0.5)
+                pan_y = st.session_state.get("pan_y", 0.5)
+                start_x, start_y, view_w, view_h = get_crop_params(w, h, zoom, pan_x, pan_y)
+                scale_factor = display_width / view_w
+                
+                real_x = int(x / scale_factor) + start_x
+                real_y = int(y / scale_factor) + start_y
+
+                # 2. SAM Segmentation
+                if not getattr(sam, "is_image_set", False): sam.set_image(img)
+                mask = sam.generate_mask(
+                    point_coords=[real_x, real_y], 
+                    level=st.session_state.get("mask_level", 0), 
+                    is_wall_only=st.session_state.get("is_wall_only", False)
+                )
+
+                if mask is not None:
+                    # 3. Apply Instantly
+                    st.session_state["pending_selection"] = {'mask': mask, 'point': (real_x, real_y)}
+                    cb_apply_pending(increment_canvas=False, silent=True) # Stable Canvas Key
+                    st.session_state["render_id"] += 1
+                    print(f"DEBUG: Top-Level Tap Success at ({real_x},{real_y})")
+        
+        except Exception as tap_err:
+            print(f"DEBUG: Top-Level Tap Error: {tap_err}")
+        
+        # 4. Clean up & Rerun to commit
+        if "tap" in st.query_params: st.query_params.pop("tap", None)
+        st.rerun()
+
     # --- 2b️⃣ CAPTURE POLY PARAM IMMEDIATELY ---
     poly_param = q_params.get("poly_pts", None)
 

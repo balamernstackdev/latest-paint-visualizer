@@ -78,6 +78,7 @@ def cb_sidebar_tool_sync(widget_key=None):
         print(f"DEBUG: Tool Switched -> {last_tool} -> {new_tool}. Signals wiped.")
 
     st.session_state["selection_tool"] = new_tool
+    st.session_state["sidebar_tool_radio"] = new_tool
     for icon, label in TOOL_MAPPING.items():
         if label == new_tool:
             st.session_state["top_tool_switcher_control"] = icon
@@ -561,73 +562,7 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
     display_height = final_display_image.shape[0]
     sam = get_sam_engine(CHECKPOINT_PATH, MODEL_TYPE)
 
-    # --- 🎯 MOBILE INTERACTION HANDLER ---
-    if mobile_tap and mobile_tap.strip() != "" and not skip_processing:
-        # SIGNAL GUARD: Ensure we only process this specific tap ONCE
-        if tap_sid and tap_sid == st.session_state.get("last_tap_sid"):
-            mobile_tap = None # Already processed
-        else:
-            if tap_sid: st.session_state["last_tap_sid"] = tap_sid
-
-        if mobile_tap:
-            try:
-                parts = mobile_tap.split(",")
-                if len(parts) >= 2:
-                    x, y = int(parts[0].strip()), int(parts[1].strip())
-                    real_x = int(x / scale_factor) + start_x
-                    real_y = int(y / scale_factor) + start_y
-                    
-                    print(f"DEBUG: Mobile Tap Handler -> x:{x}, y:{y}, Tool:{drawing_mode}, Scale:{scale_factor:.4f}")
-                    # Check for tool-specific behavior
-                    is_poly = drawing_mode == "polygon"
-                
-                picked_color = st.session_state.get('picked_color', '#3B82F6')
-                click_state_key = f"{real_x}_{real_y}_{picked_color}_{drawing_mode}"
-                
-                if click_state_key != st.session_state.get("last_mobile_tap"):
-                    st.session_state["last_mobile_tap"] = click_state_key
-                    
-                    # 🎯 TOOL SEPARATION: Skip point-tap logic for Polygon, Transform AND Box (Rect)
-                    # For Box mode, we force the user to Drag. Tapping is disabled to prevent accidental Point logic.
-                    is_direct_tap_tool = drawing_mode not in ["polygon", "transform", "rect"]
-                    
-                    if is_direct_tap_tool: # Standard point selection (AI Click only)
-                        if not getattr(sam, "is_image_set", False): 
-                            sam.set_image(st.session_state["image"])
-                        
-                        mask = sam.generate_mask(
-                            point_coords=[real_x, real_y], 
-                            level=st.session_state.get("mask_level", 0), 
-                            is_wall_only=st.session_state.get("is_wall_only", False)
-                        )
-                        
-                        if mask is not None:
-                            st.session_state["pending_selection"] = {'mask': mask, 'point': (real_x, real_y)}
-                            
-                            # CRITICAL: Apply paint immediately on mobile ONLY for Point/Lasso
-                            # For AI Object (rect), we want to show the Review/Confirm buttons first
-                            if drawing_mode != "rect":
-                                # ⚡ SMOOTH APPLY: Don't increment canvas_id to prevent flicker, silent mode
-                                cb_apply_pending(increment_canvas=False, silent=True)
-                            
-                            st.session_state["render_id"] += 1
-                            # Don't increment canvas_id here - handled by cb_apply_pending
-                            
-                            # DON'T CLEAR TAP PARAM - it triggers full rerun!
-                            # We rely on last_tap_sid for deduplication
-                            # st.query_params.pop("tap", None)
-                            
-                            # NO EXPLICIT RERUN - Streamlit auto-detects session state changes
-                            print(f"DEBUG: Paint applied for mobile tap at ({real_x},{real_y}), waiting for auto-refresh")
-                            # safe_rerun(scope="fragment")
-                    else:
-                        st.session_state["render_id"] += 1
-                        st.query_params.pop("tap", None)
-                        # safe_rerun() # Fragment scope is enough for poly pts
-            except Exception as e:
-                print(f"ERROR in mobile tap: {e}")
-                import traceback
-                traceback.print_exc()
+    # --- 🎯 MOBILE TAP HANDLED AT TOP LEVEL in app.py ---
 
     if mobile_box and mobile_box.strip() != "" and not skip_processing:
         # SIGNAL GUARD: Ensure we only process this specific box ONCE
@@ -1272,7 +1207,7 @@ def render_sidebar(sam, device_str):
             
             # DEBUG TRACE
             if "selection_tool" in st.session_state:
-                print(f"DEBUG: SIDEBAR RENDER -> Tool: {st.session_state['selection_tool']}, Radio Key: {st.session_state.get('sidebar_tool_radio')}")
+                print(f"DEBUG: SIDEBAR RENDER -> Tool: {st.session_state['selection_tool']}, Radio Key: {radio_key}")
             
             st.radio("Operation", ["Add", "Subtract"], 
                                     horizontal=True, 
