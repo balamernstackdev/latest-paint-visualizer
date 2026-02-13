@@ -244,7 +244,7 @@ class PerformanceConfig:
     SAM_CHECKPOINT_PATH = "weights/mobile_sam.pt"
     
     # Cache version (increment to invalidate caches)
-    CACHE_VERSION = "V1.1.0-STABLE"
+    CACHE_VERSION = "V1.1.2-FORCE-REL"
 
 
 # --- Export Convenience Constants ---

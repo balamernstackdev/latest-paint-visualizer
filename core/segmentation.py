@@ -66,7 +66,7 @@ class SegmentationEngine:
         
         # 3. Lapalcian Edges (base)
         edges = cv2.Laplacian(self.image_blurred, cv2.CV_16S, ksize=3)
-        self.image_edges_abs = cv2.convertScaleAbs(edges)
+        self.image_edges_map = cv2.convertScaleAbs(edges)
         
         print(f"DEBUG: SAM Engine {id(self)} - is_image_set = True ✅ (Features Pre-computed)")
         logger.info("Embeddings and features computed.")
@@ -316,7 +316,7 @@ class SegmentationEngine:
                      # Enable Edge Detection to snap to lines
                      # Use pre-computed edges
                      edge_barrier = 0
-                     _, edge_barrier = cv2.threshold(self.image_edges_abs, SegmentationConfig.EDGE_THRESHOLD_BOX_MODE, 255, cv2.THRESH_BINARY_INV)
+                     _, edge_barrier = cv2.threshold(self.image_edges_map, SegmentationConfig.EDGE_THRESHOLD_BOX_MODE, 255, cv2.THRESH_BINARY_INV)
                      edge_barrier = (edge_barrier / 255).astype(np.uint8)
                      
                      mask_refined = (mask_uint8 & valid_mask & edge_barrier)
@@ -358,7 +358,7 @@ class SegmentationEngine:
                             # 2. Edge Barrier: Catches strong edges while allowing texture detail.
                             # Use pre-computed
                             edge_thresh = SegmentationConfig.EDGE_THRESHOLD_WALL_MODE if is_wall_only else SegmentationConfig.EDGE_THRESHOLD_SMALL_OBJECT
-                            _, edge_barrier = cv2.threshold(self.image_edges_abs, edge_thresh, 255, cv2.THRESH_BINARY_INV)
+                            _, edge_barrier = cv2.threshold(self.image_edges_map, edge_thresh, 255, cv2.THRESH_BINARY_INV)
                             edge_barrier = (edge_barrier / 255).astype(np.uint8)
                             
                             mask_refined = (mask_uint8 & valid_mask & edge_barrier)
@@ -384,7 +384,7 @@ class SegmentationEngine:
                             
                             # Edge detection: allows paint to flow over soft architectural edges but stops at strong object borders
                             edge_thresh = SegmentationConfig.EDGE_THRESHOLD_WALL_MODE if is_wall_only else SegmentationConfig.EDGE_THRESHOLD_STANDARD_WALL
-                            _, edge_barrier = cv2.threshold(self.image_edges_abs, edge_thresh, 255, cv2.THRESH_BINARY_INV)
+                            _, edge_barrier = cv2.threshold(self.image_edges_map, edge_thresh, 255, cv2.THRESH_BINARY_INV)
                             edge_barrier = (edge_barrier / 255).astype(np.uint8)
                             
                             mask_refined = (mask_uint8 & valid_mask & edge_barrier)
