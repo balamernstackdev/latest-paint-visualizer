@@ -1,52 +1,51 @@
 # Upgrade Recommendations: Performance & Features
 
-Based on a deep dive into your codebase (`segmentation.py`, `sam_loader.py`, etc.), here is a guide to upgrading your project without rewriting the core application logic immediately.
+Based on the current state of your project (where **AI Model Quantization** and **Feature Pre-Computing** have already been implemented), here are the next steps to take your project to a production level.
 
-## 1. Performance Improvements
+## 1. Remaining Performance Optimizations
 
-### **A. Optimize Image Pre-Processing**
-**Current Issue:** In `segmentation.py`, specifically `generate_mask`, the code calculates grayscale, Gaussian blur, and Canny edges *every time* a user clicks.
-**Upgrade:**
-*   **Pre-compute Features:** When an image is first loaded (`set_image`), compute `gray`, `blurred`, and `edges` once and store them in the `SegmentationEngine` class instance.
-*   **Benefit:** Reduces latency for every click, especially on high-resolution images.
+### **A. Sparse Mask Storage (Critical for Memory)**
+*   **Current State:** Masks are stored as full-resolution boolean arrays in `st.session_state`.
+*   **Problem:** If a user creates 10 layers on a 4K image, the browser tab will crash due to memory overload.
+*   **Upgrade:** Use `scipy.sparse.csc_matrix` to compress masks in memory.
+*   **Benefit:** Reduces RAM usage by ~90% for typical wall masks.
 
-### **B. AI Model Quantization**
-**Current Issue:** You are loading the standard SAM weights (`mobile_sam.pt` or `vit_b`).
-**Upgrade:**
-*   **Quantize to INT8:** Use `torch.quantization` to convert the model weights to 8-bit integers.
-*   **Benefit:** Reduces memory usage by ~4x (crucial for local/CPU users) and speeds up inference significantly.
-
-### **C. Efficient MASK Storage**
-**Current Issue:** Masks are stored as full-resolution boolean arrays in `st.session_state`.
-**Upgrade:**
-*   **Sparse Format:** Use `scipy.sparse.csc_matrix` to store masks.
-*   **Benefit:** Drastically reduces RAM usage, preventing Streamlit app crashes during long sessions with many layers.
+### **B. Async Mask Generation**
+*   **Current State:** The UI freezes while the AI is thinking (2-5 seconds on CPU).
+*   **Problem:** Bad user experience; users might click repeatedly thinking it's broken.
+*   **Upgrade:** Move `sam.generate_mask` to a background thread or use `streamlit.spinner` more effectively with caching.
 
 ## 2. Missing "Production" Features
 
-### **A. Manual "Brush" Refinement**
-*   **Why:** AI isn't perfect. Sometimes you missed a tiny corner.
-*   **Feature:** Add a simple "Paintbrush" tool that allows the user to manually draw on the mask *after* the AI generates it, adding or subtracting pixels.
+### **A. Manual "Brush" Refinement (High Priority)**
+*   **Why:** AI isn't perfect. It often misses tiny corners or overspills onto the ceiling.
+*   **Feature:** Add a "Paintbrush / Eraser" tool that lets users manually fix the AI mask.
+*   **Implementation:** Use `streamlit-drawable-canvas` in "freedraw" mode to create a correction layer that is +added or -subtracted from the AI mask.
 
-### **B. Magic Wand (Color Selection)**
-*   **Why:** For simple flat walls, AI is overkill and sometimes slower.
-*   **Feature:** A classic "Magic Wand" tool that selects contiguous regions of similar color using a simple flood-fill algorithm (OpenCV `floodFill`).
+### **B. Magic Wand Tool**
+*   **Why:** For simple flat walls (like a distinct blue wall), clicking once with a color-based selector is faster than AI.
+*   **Feature:** A "Magic Wand" tool using OpenCV's `floodFill` algorithm.
 
-### **C. High-Resolution Export**
-*   **Why:** Users work on a resized preview (e.g., 800px), but want the final result in 4K.
+### **C. Realistic Rendering (Physics-Based)**
+*   **Why:** Currently, the paint looks "flat" because it just tints the pixels.
+*   **Feature:** Implement "Multiply" or "Overlay" blending modes that respect the texture and shadows of the original wall.
+*   **Advanced:** Use `LAB` color space (which you partly have) but add a "Lightness Slider" to let users simulate "Matte" vs "Glossy" finishes by adjusting the specular highlights.
+
+### **D. High-Resolution Export**
+*   **Why:** Users work on a resized preview (e.g., 800px) for speed.
 *   **Feature:** 
-    1.  Store the *operations* (clicks/prompts), not just the masks.
-    2.  On "Download", replay these operations on the full-resolution `image_original`.
-    3.  Generate the final high-quality output on demand.
+    1.  Store every "click" coordinate and "color" choice in a list.
+    2.  When the user clicks "Download High-Res":
+    3.  Load the original 4K image in the background.
+    4.  Re-run the segmentation on the 4K image using the stored clicks.
+    5.  Apply the paint and save.
 
-### **D. Compare Slider**
-*   **Why:** Clients love to see "Before vs. After".
-*   **Feature:** Use `streamlit-image-comparison` to show the original and painted images side-by-side with a draggable slider.
+## 3. Workflow Enhancements
 
-## 3. Deployment & Scalability
+### **Undo/Redo System**
+*   **Current State:** Basic session state list.
+*   **Upgrade:** Implement a robust Command Pattern undo system that can handle complex actions like "Group selection" or "Batch delete".
 
-### **Texture Caching**
-*   If you add textures (e.g., wood grain floor), ensure they are cached. Loading them from disk every render frame will slow down the app.
-
-### **Async Mask Generation**
-*   Move the `sam.generate_mask` call to a background thread or separate worker process (using `Celery` or `RQ`) so the UI remains responsive (showing a spinner) rather than freezing the browser.
+### **Project Gallery**
+*   **Current State:** You have the database models (`Project`, `User`).
+*   **Upgrade:** Build a "My Projects" dashboard where users can see thumbnails of their past work and click to resume.

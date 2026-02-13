@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 from PIL import Image
 import streamlit as st
+from scipy import sparse
 from config.constants import ColorizerConfig
 
 # Try to import adaptive processing, but make it optional
@@ -210,6 +211,10 @@ class ColorTransferEngine:
             color_hex = data.get('color')
             if not color_hex: continue
             
+            # ⚡ MEMORY OPTIMIZATION: Decompress if sparse
+            if sparse.issparse(mask):
+                mask = mask.toarray()
+            
             target_a, target_b = ColorTransferEngine.get_target_ab(color_hex)
             
             # Robust Mask Preparation
@@ -284,6 +289,15 @@ class ColorTransferEngine:
                 elif finish == 'Satin':
                     # Subtle sheen
                     layer_L = np.clip((L - 50) * 1.15 + 50, 0, 100)
+                elif finish == 'Texture':
+                    # 🧱 REALISTIC MULTIPLY BLEND (Best for Walls)
+                    # Maintains shadow definition by multiplying luminance
+                    # L_out = L_orig * (L_target / 100.0)
+                    t_rgb = self.hex_to_rgb(color_hex)
+                    t_lab = cv2.cvtColor(np.uint8([[t_rgb]]), cv2.COLOR_RGB2Lab)[0][0]
+                    target_L = t_lab[0]
+                    # Multiply relative to middle gray for balance
+                    layer_L = np.clip((L * (target_L / 70.0)), 0, 100)
                 
                 L = (layer_L * mask_soft) + (L * (1.0 - mask_soft))
 

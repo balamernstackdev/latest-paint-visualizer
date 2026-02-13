@@ -1297,7 +1297,7 @@ def render_sidebar(sam, device_str):
                     # Edge Feathering (applied before final apply)
                     st.slider("Edge Softness", 0, 5, 0, key="selection_softness", help="Feather the edges of the selection before applying paint.")
                     # Finish Selection
-                    st.radio("Paint Finish", ["Standard", "Matte", "Satin", "Gloss"], horizontal=True, key="selection_finish")
+                    st.radio("Paint Finish", ["Standard", "Matte", "Satin", "Gloss", "Texture"], horizontal=True, key="selection_finish")
             
             st.divider()
             st.subheader("👁️ View Settings")

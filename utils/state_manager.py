@@ -1,6 +1,7 @@
 import streamlit as st
 import numpy as np
 import cv2
+from scipy import sparse
 from utils.performance import cleanup_session_caches, should_trigger_cleanup
 
 def initialize_session_state():
@@ -55,6 +56,14 @@ def cb_apply_pending(increment_canvas=True, silent=False):
         current_op = st.session_state.get("selection_op")
         num_masks = len(st.session_state["masks"])
         print(f"DEBUG: cb_apply_pending -> Operation: {current_op}, Existing masks: {num_masks}")
+        
+        # ⚡ MEMORY OPTIMIZATION: Compress mask to sparse matrix for storage
+        if not sparse.issparse(new_mask['mask']):
+            try:
+                new_mask['mask'] = sparse.csc_matrix(new_mask['mask'])
+            except Exception as e:
+                print(f"WARNING: Sparse compression failed: {e}")
+        
         
         # Handle Subtraction Logic
         # Handle Subtraction Logic (Eraser Mode)
