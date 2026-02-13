@@ -144,23 +144,51 @@ def main():
                 # To adhere to the existing architecture where masks are accumulated in st.session_state["masks"], 
                 # we will manually construct the mask entry and append it.
                 
-                print("DEBUG: PAINT APPLIED (Adding to State)")
-                new_mask_entry = {
-                    'mask': accumulated_mask,
-                    'color': st.session_state.get("picked_color", "#8FBC8F"),
-                    'visible': True,
-                    'name': f"Layer {len(st.session_state['masks'])+1}",
-                    'refinement': 0,
-                    'softness': st.session_state.get("selection_softness", 0),
-                    'brightness': 0.0, 'contrast': 1.0, 'saturation': 1.0, 'hue': 0.0, 
-                    'opacity': st.session_state.get("selection_highlight_opacity", 1.0), 
-                    'finish': st.session_state.get("selection_finish", 'Standard')
-                }
+                operation = st.session_state.get("selection_op", "Add")
                 
-                # Directly append to avoid cb overhead or dependency on UI state
-                st.session_state["masks"].append(new_mask_entry)
-                st.session_state["render_id"] += 1
-                st.toast("✅ Paint Applied!", icon="🎨")
+                if operation == "Subtract":
+                     # ERASE Mode for AI Object (Box)
+                     cleaned_any = False
+                     if st.session_state["masks"]:
+                         for layer in st.session_state["masks"]:
+                             if layer.get("visible", True):
+                                 # Apply subtraction: Keep existing True only if New is False
+                                 # Resize to match execution context
+                                 target_mask = layer['mask']
+                                 mask_to_subtract = accumulated_mask
+                                 if target_mask.shape != mask_to_subtract.shape:
+                                     mask_to_subtract = cv2.resize(mask_to_subtract.astype(np.uint8), (target_mask.shape[1], target_mask.shape[0]), interpolation=cv2.INTER_NEAREST) > 0
+                                 
+                                 before_count = np.sum(target_mask)
+                                 layer['mask'] = target_mask & ~mask_to_subtract
+                                 if np.sum(layer['mask']) < before_count:
+                                     cleaned_any = True
+                         
+                     if cleaned_any:
+                         st.session_state["render_id"] += 1
+                         st.toast("✅ Paint Erased!", icon="🧹")
+                     else:
+                         st.toast("⚠️ Nothing to erase!", icon="✨")
+
+                else:
+                    # ADD Mode
+                    print("DEBUG: PAINT APPLIED (Adding to State)")
+                    new_mask_entry = {
+                        'mask': accumulated_mask,
+                        'color': st.session_state.get("picked_color", "#8FBC8F"),
+                        'visible': True,
+                        'name': f"Layer {len(st.session_state['masks'])+1}",
+                        'refinement': 0,
+                        'softness': st.session_state.get("selection_softness", 0),
+                        'brightness': 0.0, 'contrast': 1.0, 'saturation': 1.0, 'hue': 0.0, 
+                        'opacity': st.session_state.get("selection_highlight_opacity", 1.0), 
+                        'finish': st.session_state.get("selection_finish", 'Standard')
+                    }
+                    
+                    # Directly append to avoid cb overhead or dependency on UI state
+                    st.session_state["masks"].append(new_mask_entry)
+                    st.session_state["render_id"] += 1
+                    # st.toast("✅ Paint Applied!", icon="🎨")
             else:
                 print("DEBUG: ⚠️ SAM returned None in Early Processor")
                 st.toast("⚠️ No object detected.", icon="🤷‍♂️")
@@ -220,37 +248,75 @@ def main():
                     pts.append([int(px / scale_factor) + start_x, int(py / scale_factor) + start_y])
             
             if len(pts) > 2:
-                # STRATEGY: Use Bounding Box of Polygon as SAM Prompt
-                # This aligns with USER REQUEST: "Feed mask as positive region to SAM" (interpreted as Box Prompt for stability)
-                pts_arr = np.array(pts)
-                x_min, y_min = np.min(pts_arr, axis=0)
-                x_max, y_max = np.max(pts_arr, axis=0)
-                box = [x_min, y_min, x_max, y_max]
+                # Determine Mode: Manual (Freehand) vs AI (Polygon)
+                # "Lasso (Freehand)" -> Manual Fill (User expectation: "Draw the place to apply color")
+                # "Polygonal Lasso" -> AI Assisted (SAM Box Prompts)
                 
-                print(f"DEBUG: Poly Box -> {box}")
+                current_tool = st.session_state.get("selection_tool", "")
+                is_freehand = "Lasso (Freehand)" in current_tool
                 
-                if not getattr(sam, "is_image_set", False): sam.set_image(img)
-                # Use standard level 0 or 1 based on user pref
-                mask = sam.generate_mask(box_coords=box, level=st.session_state.get("mask_level", 0), is_wall_only=st.session_state.get("is_wall_only", False))
+                # Check for explicit "Fill Selection" toggle (overrides default)
+                # Default for Freehand is True (Manual), Default for Polygon is False (AI)
+                force_manual = st.session_state.get("fill_selection", is_freehand)
+                
+                if is_freehand or force_manual:
+                     print("DEBUG: processing as MANUAL MASK (Freehand)")
+                     # Create blank mask
+                     mask_shape = (h, w)
+                     manual_mask = np.zeros(mask_shape, dtype=np.uint8)
+                     
+                     # Fill Polygon
+                     pts_arr = np.array(pts, dtype=np.int32)
+                     cv2.fillPoly(manual_mask, [pts_arr], 1)
+                     
+                     mask = manual_mask.astype(bool)
+                else:
+                    # STRATEGY: Use Bounding Box of Polygon as SAM Prompt
+                    print("DEBUG: processing as AI MASK (SAM Box from Poly)")
+                    pts_arr = np.array(pts)
+                    x_min, y_min = np.min(pts_arr, axis=0)
+                    x_max, y_max = np.max(pts_arr, axis=0)
+                    box = [x_min, y_min, x_max, y_max]
+                    
+                    if not getattr(sam, "is_image_set", False): sam.set_image(img)
+                    mask = sam.generate_mask(box_coords=box, level=st.session_state.get("mask_level", 0), is_wall_only=st.session_state.get("is_wall_only", False))
 
                 if mask is not None:
-                     print("DEBUG: POLY PAINT APPLIED")
-                     new_mask_entry = {
-                        'mask': mask,
-                        'color': st.session_state.get("picked_color", "#8FBC8F"),
-                        'visible': True,
-                        'name': f"Layer {len(st.session_state['masks'])+1}",
-                        'refinement': 0,
-                        'softness': st.session_state.get("selection_softness", 0),
-                        'brightness': 0.0, 'contrast': 1.0, 'saturation': 1.0, 'hue': 0.0, 
-                        'opacity': st.session_state.get("selection_highlight_opacity", 1.0), 
-                        'finish': st.session_state.get("selection_finish", 'Standard')
-                    }
-                     st.session_state["masks"].append(new_mask_entry)
-                     st.session_state["render_id"] += 1
-                     st.toast("✅ Polygon Paint Applied!", icon="🕸️")
+                     # Check Operation: Add vs Subtract
+                     operation = st.session_state.get("selection_op", "Add")
+                     
+                     if operation == "Subtract":
+                         # ERASE Mode: Remove this mask from ALL existing active layers
+                         cleaned_any = False
+                         for layer in st.session_state["masks"]:
+                             if layer.get("visible", True):
+                                 # Apply subtraction: Keep existing True only if New is False
+                                 layer['mask'] = layer['mask'] & ~mask
+                                 cleaned_any = True
+                         
+                         if cleaned_any:
+                             st.session_state["render_id"] += 1
+                             # st.toast("✅ Area Erased!", icon="🧹")
+                     else:
+                         # ADD Mode: Append new layer
+                         new_mask_entry = {
+                            'mask': mask,
+                            'color': st.session_state.get("picked_color", "#8FBC8F"),
+                            'visible': True,
+                            'name': f"Layer {len(st.session_state['masks'])+1}",
+                            'refinement': 0,
+                            'softness': st.session_state.get("selection_softness", 0),
+                            'brightness': 0.0, 'contrast': 1.0, 'saturation': 1.0, 'hue': 0.0, 
+                            'opacity': st.session_state.get("selection_highlight_opacity", 1.0), 
+                            'finish': st.session_state.get("selection_finish", 'Standard')
+                        }
+                         st.session_state["masks"].append(new_mask_entry)
+                         st.session_state["render_id"] += 1
+                         # st.toast("✅ Paint Applied!", icon="🎨")
+
                 else:
-                    st.toast("⚠️ No object found in lasso.", icon="🤷‍♂️")
+                    # st.toast("⚠️ No object found.", icon="🤷‍♂️")
+                    pass
             
         except Exception as e:
             print(f"DEBUG: Poly Processor Error: {e}")

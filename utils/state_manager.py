@@ -37,7 +37,7 @@ def initialize_session_state():
         if key not in st.session_state:
             st.session_state[key] = value
 
-def cb_apply_pending():
+def cb_apply_pending(increment_canvas=True, silent=False):
     if st.session_state.get("pending_selection") is not None:
         new_mask = st.session_state["pending_selection"].copy()
         new_mask.update({
@@ -57,35 +57,49 @@ def cb_apply_pending():
         print(f"DEBUG: cb_apply_pending -> Operation: {current_op}, Existing masks: {num_masks}")
         
         # Handle Subtraction Logic
-        if current_op == "Subtract" and st.session_state["masks"]:
-            # Target the selected layer if valid, otherwise the last one
-            target_idx = st.session_state.get("selected_layer_idx")
-            if target_idx is None or not (0 <= target_idx < len(st.session_state["masks"])):
-                target_idx = len(st.session_state["masks"]) - 1
-            
-            print(f"DEBUG: SUBTRACT mode -> Target layer index: {target_idx}")
-            
-            # Perform logical subtraction
-            # Ensure masks are the same shape before bitwise operation
-            target_mask = st.session_state["masks"][target_idx]['mask']
-            new_selection_mask = new_mask['mask']
-            
-            # Simple check/resize if needed (should already be same shape)
-            if target_mask.shape != new_selection_mask.shape:
-                new_selection_mask = cv2.resize(new_selection_mask.astype(np.uint8), (target_mask.shape[1], target_mask.shape[0]), interpolation=cv2.INTER_NEAREST) > 0
-            
-            # Count pixels before and after
-            before_count = np.sum(target_mask)
-            st.session_state["masks"][target_idx]['mask'] = target_mask & ~new_selection_mask
-            after_count = np.sum(st.session_state["masks"][target_idx]['mask'])
-            removed_count = before_count - after_count
-            
-            print(f"DEBUG: Subtraction applied -> Removed {removed_count} pixels from layer {target_idx}")
-            
-            # --- USER FEEDBACK: Warning if nothing happened ---
-            if removed_count == 0:
-                st.toast("⚠️ No overlap! Subtraction only works if you select over an existing painted area.", icon="ℹ️")
+        # Handle Subtraction Logic (Eraser Mode)
+        if current_op == "Subtract":
+            if st.session_state["masks"]:
+                print(f"DEBUG: SUBTRACT mode -> Applying to ALL layers")
+                
+                total_removed = 0
+                cleaned_any = False
+                new_selection_mask = new_mask['mask']
+
+                # Iterate through ALL layers to erase from everything
+                for layer in st.session_state["masks"]:
+                    if layer.get("visible", True):
+                        target_mask = layer['mask']
+                        
+                        # Resize if needed (safety check for consistency)
+                        if target_mask.shape != new_selection_mask.shape:
+                            resized_new = cv2.resize(new_selection_mask.astype(np.uint8), (target_mask.shape[1], target_mask.shape[0]), interpolation=cv2.INTER_NEAREST) > 0
+                        else:
+                            resized_new = new_selection_mask
+
+                        before_count = np.sum(target_mask)
+                        layer['mask'] = target_mask & ~resized_new
+                        after_count = np.sum(layer['mask'])
+                        
+                        diff = before_count - after_count
+                        total_removed += diff
+                        if diff > 0:
+                            cleaned_any = True
+
+                print(f"DEBUG: Subtraction applied -> Removed {total_removed} pixels total")
+                
+                # --- USER FEEDBACK (Only if not silent) ---
+                if not silent:
+                    if not cleaned_any:
+                        st.toast("⚠️ selected area didn't overlap with any paint.", icon="ℹ️")
+                    else:
+                        st.toast("✅ Paint Erased!", icon="🧹")
+            else:
+                if not silent:
+                    st.toast("⚠️ Nothing to erase! The canvas is clean.", icon="✨")
+        
         else:
+            # ADD Mode (Default)
             print(f"DEBUG: ADD mode -> Creating new layer")
             st.session_state["masks"].append(new_mask)
             
@@ -93,7 +107,11 @@ def cb_apply_pending():
         st.session_state["pending_selection"] = None
         st.session_state["pending_boxes"] = []
         st.session_state["render_id"] += 1
-        st.session_state["canvas_id"] = st.session_state.get("canvas_id", 0) + 1  # Re-enabled to clear box on apply
+        
+        # ⚡ OPTIMIZATION: Allow skipping canvas reset for smooth continuous clicking
+        if increment_canvas:
+            st.session_state["canvas_id"] = st.session_state.get("canvas_id", 0) + 1
+            
         st.session_state["canvas_raw"] = {} # Force clear cached objects
         st.session_state["just_applied"] = True # 🛡️ Guard against object persistence loops
 

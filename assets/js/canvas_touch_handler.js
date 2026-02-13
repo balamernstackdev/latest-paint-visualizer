@@ -219,9 +219,9 @@
         }
 
         checkMode() {
-            if (!this.mount()) return;
             let mode = window.CANVAS_CONFIG?.DRAWING_MODE || 'point';
             if (mode === 'rect') {
+                if (!this.mount()) return;
                 this.show();
                 this.updateDOM();
             } else {
@@ -252,16 +252,25 @@
                 this.boxContainer.appendChild(el);
             });
 
-            // Update handles... (simplified for brevity, logic same as before)
             if (this.selectedIndex !== -1) {
-                this.handleContainer.style.display = 'block';
-                // ... handle positioning logic
                 const b = this.boxes[this.selectedIndex];
-                const map = { nw: [b.x, b.y], se: [b.x + b.w, b.y + b.h], /* etc */ };
-                // Just minimal handle for deletion visual context
-                this.handles[0].style.left = b.x + 'px'; this.handles[0].style.top = b.y + 'px';
-                this.handles[4].style.left = (b.x + b.w) + 'px'; this.handles[4].style.top = (b.y + b.h) + 'px';
-                this.handles.forEach(h => h.style.display = 'block'); // Show roughly
+                const map = {
+                    nw: [b.x, b.y], n: [b.x + b.w / 2, b.y], ne: [b.x + b.w, b.y],
+                    e: [b.x + b.w, b.y + b.h / 2], se: [b.x + b.w, b.y + b.h],
+                    s: [b.x + b.w / 2, b.y + b.h], sw: [b.x, b.y + b.h],
+                    w: [b.x, b.y + b.h / 2]
+                };
+
+                this.handles.forEach(h => {
+                    const pos = h.dataset.handle;
+                    const coords = map[pos];
+                    if (coords) {
+                        h.style.left = coords[0] + 'px';
+                        h.style.top = coords[1] + 'px';
+                        h.style.display = 'block';
+                    }
+                });
+                this.handleContainer.style.display = 'block';
             } else {
                 this.handleContainer.style.display = 'none';
             }
@@ -269,44 +278,133 @@
             this.toolbar.style.display = this.boxes.length > 0 ? 'flex' : 'none';
         }
 
-        onPointerDown(e) { /* ... copied logic from previous step, omitted for brevity but assumed present ... */
-            // Minimal Logic for robustness
+        onPointerDown(e) {
             e.preventDefault();
             this.overlay.setPointerCapture(e.pointerId);
+
             const rect = this.overlay.getBoundingClientRect();
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
 
-            // Box Hit Test
+            // 1. Check Active Handles
+            if (e.target.dataset.handle) {
+                this.isMoving = false;
+                this.isDrawing = false;
+                this.activeHandle = e.target.dataset.handle;
+                // Clone current box state for start reference
+                this.startBox = { ...this.boxes[this.selectedIndex] };
+                this.startX = e.clientX;
+                this.startY = e.clientY;
+                return;
+            }
+
+            // 2. Check Box Click (Move)
             for (let i = this.boxes.length - 1; i >= 0; i--) {
                 const b = this.boxes[i];
                 if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) {
-                    this.selectedIndex = i; this.updateDOM(); return;
+                    this.selectedIndex = i;
+                    this.isMoving = true;
+                    this.isDrawing = false;
+                    this.activeHandle = null;
+                    this.startX = e.clientX;
+                    this.startY = e.clientY;
+                    this.startBox = { ...b };
+                    this.updateDOM();
+                    return;
                 }
             }
-            // New Box
-            this.isDrawing = true; this.startX = x; this.startY = y;
-            this.boxes.push({ x, y, w: 0, h: 0 });
+
+            // 3. New Box
+            this.isDrawing = true;
+            this.isMoving = false;
+            this.activeHandle = null;
+            this.startX = x;
+            this.startY = y;
+            const newBox = { x, y, w: 0, h: 0 };
+            this.boxes.push(newBox);
             this.selectedIndex = this.boxes.length - 1;
+            // For new box, startBox just tracks origin
+            this.startBox = { ...newBox };
+            this.updateDOM();
         }
 
         onPointerMove(e) {
-            if (!this.isDrawing) return;
+            if (!this.isDrawing && !this.isMoving && !this.activeHandle) return;
+            e.preventDefault();
+
             const rect = this.overlay.getBoundingClientRect();
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
-            const b = this.boxes[this.selectedIndex];
-            // Simple drag
-            b.w = Math.abs(x - this.startX); b.h = Math.abs(y - this.startY);
-            b.x = Math.min(x, this.startX); b.y = Math.min(y, this.startY);
+
+            if (this.isDrawing) {
+                const b = this.boxes[this.selectedIndex];
+                const minX = Math.min(this.startX, x);
+                const minY = Math.min(this.startY, y);
+                const w = Math.abs(x - this.startX);
+                const h = Math.abs(y - this.startY);
+                // Clamp to canvas
+                b.x = Math.max(0, minX);
+                b.y = Math.max(0, minY);
+                b.w = Math.min(w, rect.width - b.x);
+                b.h = Math.min(h, rect.height - b.y);
+            }
+            else if (this.isMoving) {
+                const dx = e.clientX - this.startX;
+                const dy = e.clientY - this.startY;
+                const b = this.boxes[this.selectedIndex];
+                const sb = this.startBox;
+
+                let nx = sb.x + dx;
+                let ny = sb.y + dy;
+
+                // Clamp
+                nx = Math.max(0, Math.min(nx, rect.width - sb.w));
+                ny = Math.max(0, Math.min(ny, rect.height - sb.h));
+
+                b.x = nx; b.y = ny;
+            }
+            else if (this.activeHandle) {
+                const dx = e.clientX - this.startX;
+                const dy = e.clientY - this.startY;
+                const b = this.boxes[this.selectedIndex];
+                const sb = this.startBox;
+
+                let nx = sb.x, ny = sb.y, nw = sb.w, nh = sb.h;
+
+                if (this.activeHandle.includes('e')) nw = sb.w + dx;
+                if (this.activeHandle.includes('s')) nh = sb.h + dy;
+                if (this.activeHandle.includes('w')) { nw = sb.w - dx; nx = sb.x + dx; }
+                if (this.activeHandle.includes('n')) { nh = sb.h - dy; ny = sb.y + dy; }
+
+                // Min size check
+                if (nw < 20) {
+                    if (this.activeHandle.includes('w')) nx = sb.x + sb.w - 20;
+                    nw = 20;
+                }
+                if (nh < 20) {
+                    if (this.activeHandle.includes('n')) ny = sb.y + sb.h - 20;
+                    nh = 20;
+                }
+
+                b.x = nx; b.y = ny; b.w = nw; b.h = nh;
+            }
+
             requestAnimationFrame(() => this.updateDOM());
         }
 
         onPointerUp(e) {
+            this.overlay.releasePointerCapture(e.pointerId);
             this.isDrawing = false;
-            if (this.selectedIndex !== -1 && this.boxes[this.selectedIndex].w < 5) {
-                this.boxes.splice(this.selectedIndex, 1);
-                this.selectedIndex = -1;
+            this.isMoving = false;
+            this.activeHandle = null;
+
+            if (this.selectedIndex !== -1) {
+                const b = this.boxes[this.selectedIndex];
+                // Remove if too small (accidental tap)
+                if (b.w < 10 || b.h < 10) {
+                    this.boxes.splice(this.selectedIndex, 1);
+                    this.selectedIndex = -1;
+                }
             }
             this.updateDOM();
         }
@@ -327,8 +425,13 @@
             url.searchParams.set('box', val);
             url.searchParams.delete('tap'); url.searchParams.delete('poly_pts');
             throttledReplaceState(url);
+
+            // Clear INSTANTLY to give feedback
+            this.boxes = [];
+            this.selectedIndex = -1;
+            this.updateDOM();
+
             setTimeout(() => triggerRerun(), 500);
-            this.boxes = []; this.updateDOM();
         }
     }
 
@@ -402,9 +505,11 @@
         }
 
         checkMode() {
-            if (!this.mount()) return;
             let mode = window.CANVAS_CONFIG?.DRAWING_MODE || 'point';
-            if (mode === 'polygon' || mode === 'freedraw') { // Map polygon tool to this editor
+            this.mode = mode; // Store mode
+
+            if (mode === 'polygon' || mode === 'freedraw') {
+                if (!this.mount()) return;
                 this.show();
                 this.render();
             } else {
@@ -416,30 +521,63 @@
 
         onPointerDown(e) {
             e.preventDefault();
-            e.stopPropagation(); // prevent streamlit reruns
+            e.stopPropagation();
 
-            if (this.isClosed) return; // Locked when closed, user must Apply or Undo
+            if (this.isClosed) return;
 
             const rect = this.overlay.getBoundingClientRect();
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
 
-            // Touch "double tap" logic manual detection if needed? 
-            // relying on standard dblclick for now which works on mobile too usually
+            if (this.mode === 'freedraw') {
+                // Freehand: Start new shape on down
+                this.points = [{ x, y }];
+                this.isDrawing = true;
+                this.render();
+            } else {
+                // Polygon: Add point
+                if (this.points.length > 2) {
+                    const start = this.points[0];
+                    const dx = x - start.x;
+                    const dy = y - start.y;
+                    if (Math.sqrt(dx * dx + dy * dy) < 20) {
+                        this.closePolygon();
+                        return;
+                    }
+                }
+                this.points.push({ x, y });
+                this.render();
+            }
+        }
 
-            // Check if clicking near start point to close
-            if (this.points.length > 2) {
-                const start = this.points[0];
-                const dx = x - start.x;
-                const dy = y - start.y;
-                if (Math.sqrt(dx * dx + dy * dy) < 20) {
-                    this.closePolygon();
-                    return;
+        onPointerMove(e) {
+            if (this.mode === 'freedraw' && this.isDrawing) {
+                const rect = this.overlay.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+
+                // Standard Throttle (5px) - restoration
+                const last = this.points[this.points.length - 1];
+                const dx = x - last.x;
+                const dy = y - last.y;
+                if (dx * dx + dy * dy > 25) {
+                    this.points.push({ x, y });
+                    this.render();
                 }
             }
+        }
 
-            this.points.push({ x, y });
-            this.render();
+        onPointerUp(e) {
+            if (this.mode === 'freedraw' && this.isDrawing) {
+                this.isDrawing = false;
+                // Revert instant commit. User must double click or click "Apply"
+                if (this.points.length > 2) {
+                    this.closePolygon();
+                } else {
+                    this.points = [];
+                    this.render();
+                }
+            }
         }
 
         onDoubleClick(e) {
@@ -451,7 +589,7 @@
 
         undo() {
             if (this.isClosed) {
-                this.isClosed = false; // Re-open
+                this.isClosed = false;
             } else {
                 this.points.pop();
             }
@@ -464,7 +602,6 @@
         }
 
         render() {
-            // Clear SVG
             while (this.svg.firstChild) this.svg.removeChild(this.svg.firstChild);
 
             if (this.points.length === 0) {
@@ -481,27 +618,27 @@
             if (this.isClosed) d += " Z";
 
             path.setAttribute("d", d);
-            path.setAttribute("stroke", "#00FFFF"); // Cyan for visibility
+            path.setAttribute("stroke", "#00FFFF");
             path.setAttribute("stroke-width", "3");
             path.setAttribute("fill", this.isClosed ? "rgba(0, 255, 255, 0.3)" : "none");
             path.setAttribute("stroke-linejoin", "round");
             this.svg.appendChild(path);
 
-            // Draw Vertices
-            this.points.forEach((p, i) => {
-                const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-                c.setAttribute("cx", p.x);
-                c.setAttribute("cy", p.y);
-                c.setAttribute("r", "5");
-                c.setAttribute("fill", i === 0 ? "#FF4B4B" : "white");
-                c.setAttribute("stroke", "#333");
-                this.svg.appendChild(c);
-            });
+            // Draw Vertices (ONLY for Polygon mode, HIDE for Freehand to avoid "dot" confusion)
+            if (this.mode !== 'freedraw') {
+                this.points.forEach((p, i) => {
+                    const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+                    c.setAttribute("cx", p.x);
+                    c.setAttribute("cy", p.y);
+                    c.setAttribute("r", "5");
+                    c.setAttribute("fill", i === 0 ? "#FF4B4B" : "white");
+                    c.setAttribute("stroke", "#333");
+                    this.svg.appendChild(c);
+                });
+            }
 
-            // Toolbar visibility
             if (this.points.length > 0) {
                 this.toolbar.style.display = 'flex';
-                // Toggle Apply button enabled/disabled?
                 const applyBtn = this.toolbar.querySelector('button:last-child');
                 applyBtn.style.opacity = this.isClosed ? '1' : '0.5';
                 applyBtn.style.pointerEvents = this.isClosed ? 'auto' : 'none';

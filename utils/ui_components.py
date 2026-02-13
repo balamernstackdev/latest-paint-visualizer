@@ -20,7 +20,6 @@ from .sam_loader import get_sam_engine, CHECKPOINT_PATH, MODEL_TYPE
 TOOL_MAPPING = {
     "👆": "👆 AI Click (Point)",
     "✨": "✨ AI Object (Box)",
-    "🎨": "🎨 Lasso (Freehand)",
     "🕸️": "🕸️ Polygonal Lasso"
 }
 
@@ -525,11 +524,23 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
     # --- 🔔 TOP ACTION BAR (Immediate Visibility) ---
     # Render Apply/Cancel buttons at the TOP for mobile accessibility
     if st.session_state.get("pending_selection") is not None:
-        st.info("✨ Selection Active! Confirm below.", icon="👇")
+        op_label = "Add"
+        if st.session_state.get("selection_op") == "Subtract":
+            op_label = "Subtract"
+            btn_label = "🧹 ERASE PAINT"
+            btn_type = "secondary" # Use secondary color for erase/destructive action? OR stick with primary. Let's stick with primary but change label.
+        else:
+            btn_label = "✨ APPLY PAINT"
+            btn_type = "primary"
+            
+        st.info(f"✨ Selection Active ({op_label})! Confirm below.", icon="👇")
+        
         with st.container(border=True):
             cols = st.columns([1, 1], gap="small")
             with cols[0]: 
-                if st.button("✨ APPLY PAINT", use_container_width=True, key="top_frag_apply", type="primary"):
+                # DYNAMIC LABEL BASED ON OP
+                if st.button(btn_label, use_container_width=True, key="top_frag_apply", type="primary"):
+                    print(f"DEBUG: PROCEEDING WITH OP: {op_label}")
                     cb_apply_pending(); safe_rerun()
             with cols[1]: 
                 if st.button("🗑️ CANCEL", use_container_width=True, key="top_frag_cancel"):
@@ -596,17 +607,19 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                             # CRITICAL: Apply paint immediately on mobile ONLY for Point/Lasso
                             # For AI Object (rect), we want to show the Review/Confirm buttons first
                             if drawing_mode != "rect":
-                                cb_apply_pending()
+                                # ⚡ SMOOTH APPLY: Don't increment canvas_id to prevent flicker, silent mode
+                                cb_apply_pending(increment_canvas=False, silent=True)
                             
                             st.session_state["render_id"] += 1
-                            st.session_state["canvas_id"] = st.session_state.get("canvas_id", 0) + 1
+                            # Don't increment canvas_id here - handled by cb_apply_pending
                             
-                            # Clear the tap parameter
-                            st.query_params.pop("tap", None)
+                            # DON'T CLEAR TAP PARAM - it triggers full rerun!
+                            # We rely on last_tap_sid for deduplication
+                            # st.query_params.pop("tap", None)
                             
-                            # CRITICAL FIX: Explicitly trigger rerun to show the painted result
-                            print(f"DEBUG: Paint applied for mobile tap at ({real_x},{real_y}), triggering rerun")
-                            safe_rerun()
+                            # NO EXPLICIT RERUN - Streamlit auto-detects session state changes
+                            print(f"DEBUG: Paint applied for mobile tap at ({real_x},{real_y}), waiting for auto-refresh")
+                            # safe_rerun(scope="fragment")
                     else:
                         st.session_state["render_id"] += 1
                         st.query_params.pop("tap", None)
@@ -807,9 +820,13 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                             mask = sam.generate_mask(point_coords=[real_x, real_y], level=st.session_state.get("mask_level", 0), is_wall_only=st.session_state.get("is_wall_only", False))
                             if mask is not None:
                                 st.session_state["pending_selection"] = {'mask': mask, 'point': (real_x, real_y)}
-                                if st.session_state.get("ai_click_instant_apply", True): cb_apply_pending()
+                                # ⚡ SMOOTH APPLY: Don't increment canvas_id to prevent flicker, silent mode
+                                if st.session_state.get("ai_click_instant_apply", True): 
+                                    cb_apply_pending(increment_canvas=False, silent=True)
+                                
                                 st.session_state["render_id"] += 1
-                                safe_rerun()
+                                # NO EXPLICIT RERUN - Let Streamlit auto-detect state changes
+                                # safe_rerun(scope="fragment")
                         break 
             
             elif "Lasso" in tool_mode and "Polygonal" not in tool_mode:
@@ -1264,7 +1281,10 @@ def render_sidebar(sam, device_str):
                                     on_change=cb_sidebar_op_sync)
             
             # --- Tool Specific Controls (Full Width) ---
-            if any(t in current_tool for t in ["AI Click", "Lasso", "AI Object"]):
+            # --- Tool Specific Controls (Full Width) ---
+            # 🎯 HIDE LAYER SCOPE FOR POLYGONAL LASSO AND FREEHAND LASSO AND AI OBJECT (As Requested)
+            # Only show scope for AI Click (Point)
+            if "AI Click" in current_tool:
                 st.caption("Layer Scope:")
                 prec_options = ["Standard Walls", "Small Details", "Whole Object"]
                 current_idx = min(st.session_state.get("mask_level", 0), 2)
@@ -1276,26 +1296,28 @@ def render_sidebar(sam, device_str):
                 # ⚡ Always Instant Apply
                 st.session_state["ai_click_instant_apply"] = True
 
+            # 🎯 HIDE ACTION OPTIONS FOR AI OBJECT (BOX)
+            # Force "Draw New" mode silently if AI Object is selected, but do not show the UI.
             if "AI Object" in current_tool:
-                st.session_state["ai_drag_sub_tool"] = st.radio("Action", ["🆕 Draw New", "🖱️ Move"], index=0 if st.session_state.get("ai_drag_sub_tool") == "🆕 Draw New" else 1, horizontal=True)
-                # st.session_state["snap_to_edges"] = st.toggle("Snap to Edges 🔍", value=st.session_state.get("snap_to_edges", False), help="Attempts to automatically align your box to nearby architectural lines.")
+                st.session_state["ai_drag_sub_tool"] = "🆕 Draw New"
+                # st.caption("Draw a box around the object.")
             
+            # 🎯 HIDE FINISH/CLEAR BUTTONS FOR POLYGONAL LASSO (Requested)
             if "Polygonal" in current_tool:
-                # Use columns for buttons, but now they have full sidebar width to split
-                p_colA, p_colB = st.columns(2)
-                with p_colA:
-                    if st.button("✅ FINISH", use_container_width=True, type="primary", key="side_poly_finish", help="Complete the shape (or triple-click last point)"):
-                        st.session_state["force_finish_poly"] = True
-                        safe_rerun()
-                with p_colB:
-                    if st.button("🧹 CLEAR", use_container_width=True, key="side_poly_clear", help="Clear drawing"):
-                        st.session_state["canvas_id"] = st.session_state.get("canvas_id", 0) + 1
-                        st.session_state["force_finish_poly"] = False
-                        st.query_params.pop("poly_pts", None)
-                        import streamlit.components.v1 as components
-                        components.html("<script>window.parent.STREAMLIT_POLY_POINTS = [];</script>", height=0)
+                # p_colA, p_colB = st.columns(2)
+                # with p_colA:
+                #     if st.button("✅ FINISH", use_container_width=True, type="primary", key="side_poly_finish", help="Complete the shape (or triple-click last point)"):
+                #         st.session_state["force_finish_poly"] = True
+                #         safe_rerun()
+                # with p_colB:
+                #     if st.button("🧹 CLEAR", use_container_width=True, key="side_poly_clear", help="Clear drawing"):
+                #         st.session_state["canvas_id"] = st.session_state.get("canvas_id", 0) + 1
+                #         st.session_state["force_finish_poly"] = False
+                #         st.query_params.pop("poly_pts", None)
+                #         import streamlit.components.v1 as components
+                #         components.html("<script>window.parent.STREAMLIT_POLY_POINTS = [];</script>", height=0)
                 if "Polygonal Lasso" in current_tool:
-                    st.caption("Instructions: Click to add points. **Double-click** or click **FINISH** below to apply paint.")
+                    st.caption("Instructions: **Double-click** to apply paint.")
                 elif "Lasso (Freehand)" in current_tool:
                     st.caption("Instructions: Draw your area. Paint applies when you release.")
             
