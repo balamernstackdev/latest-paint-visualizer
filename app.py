@@ -173,6 +173,92 @@ def main():
         # Clear param to prevent loop (Step 2 requirement)
         if "box" in st.query_params:
             st.query_params.pop("box", None)
+
+    # --- 2b️⃣ CAPTURE POLY PARAM IMMEDIATELY ---
+    poly_param = q_params.get("poly_pts", None)
+
+    # --- 3b️⃣ PROCESS POLYGON SEGMENTATION IMMEDIATELY ---
+    if poly_param and st.session_state.get("image") is not None:
+        print(f"DEBUG: POLY PARAM DETECTED -> {poly_param}")
+        try:
+            # Parse Timestamp
+            if "," in poly_param:
+                parts = poly_param.split(",")
+                # Format: x,y;x,y;...TIMESTAMP
+                # The timestamp is the LAST element after the last comma or semicolon?
+                # JS sends: `ptsStr + ',' + Date.now()` where ptsStr is `x,y;x,y`
+                # So splitting by `,` might mix coords. 
+                # Better: look for last comma
+                last_comma_idx = poly_param.rfind(",")
+                if last_comma_idx != -1:
+                    timestamp = poly_param[last_comma_idx+1:]
+                    if len(timestamp) > 9 and timestamp.isdigit():
+                        poly_str = poly_param[:last_comma_idx]
+                    else:
+                        poly_str = poly_param
+                else:
+                    poly_str = poly_param
+            else:
+                poly_str = poly_param
+
+            # Replicate View/Scale Logic
+            img = st.session_state["image"]
+            h, w = img.shape[:2]
+            display_width = 800
+            
+            zoom = st.session_state.get("zoom_level", 1.0)
+            pan_x = st.session_state.get("pan_x", 0.5)
+            pan_y = st.session_state.get("pan_y", 0.5)
+            start_x, start_y, view_w, view_h = get_crop_params(w, h, zoom, pan_x, pan_y)
+            scale_factor = display_width / view_w
+            
+            # Parse Points
+            pts = []
+            for p_pair in poly_str.split(";"):
+                if "," in p_pair:
+                    px, py = map(float, p_pair.split(","))
+                    pts.append([int(px / scale_factor) + start_x, int(py / scale_factor) + start_y])
+            
+            if len(pts) > 2:
+                # STRATEGY: Use Bounding Box of Polygon as SAM Prompt
+                # This aligns with USER REQUEST: "Feed mask as positive region to SAM" (interpreted as Box Prompt for stability)
+                pts_arr = np.array(pts)
+                x_min, y_min = np.min(pts_arr, axis=0)
+                x_max, y_max = np.max(pts_arr, axis=0)
+                box = [x_min, y_min, x_max, y_max]
+                
+                print(f"DEBUG: Poly Box -> {box}")
+                
+                if not getattr(sam, "is_image_set", False): sam.set_image(img)
+                # Use standard level 0 or 1 based on user pref
+                mask = sam.generate_mask(box_coords=box, level=st.session_state.get("mask_level", 0), is_wall_only=st.session_state.get("is_wall_only", False))
+
+                if mask is not None:
+                     print("DEBUG: POLY PAINT APPLIED")
+                     new_mask_entry = {
+                        'mask': mask,
+                        'color': st.session_state.get("picked_color", "#8FBC8F"),
+                        'visible': True,
+                        'name': f"Layer {len(st.session_state['masks'])+1}",
+                        'refinement': 0,
+                        'softness': st.session_state.get("selection_softness", 0),
+                        'brightness': 0.0, 'contrast': 1.0, 'saturation': 1.0, 'hue': 0.0, 
+                        'opacity': st.session_state.get("selection_highlight_opacity", 1.0), 
+                        'finish': st.session_state.get("selection_finish", 'Standard')
+                    }
+                     st.session_state["masks"].append(new_mask_entry)
+                     st.session_state["render_id"] += 1
+                     st.toast("✅ Polygon Paint Applied!", icon="🕸️")
+                else:
+                    st.toast("⚠️ No object found in lasso.", icon="🤷‍♂️")
+            
+        except Exception as e:
+            print(f"DEBUG: Poly Processor Error: {e}")
+            import traceback
+            traceback.print_exc()
+
+        if "poly_pts" in st.query_params:
+             st.query_params.pop("poly_pts", None)
             
     # --- 4️⃣ RENDER IMAGE ---
     if st.session_state.get("image") is not None:
