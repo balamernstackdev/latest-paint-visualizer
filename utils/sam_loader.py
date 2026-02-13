@@ -20,6 +20,20 @@ def get_sam_model(path, type_name, salt=""):
     # Create the model instance using the registry directly
     model = sam_model_registry[type_name](checkpoint=path)
     model.to(device=device)
+    
+    # --- PERFORMANCE OPTIMIZATION: QUANTIZATION ---
+    if device == "cpu":
+        try:
+            print(f"DEBUG: Applying dynamic quantization to {type_name} model...")
+            model = torch.quantization.quantize_dynamic(
+                model,
+                {torch.nn.Linear, torch.nn.Conv2d},
+                dtype=torch.qint8
+            )
+            print("DEBUG: Quantization complete.")
+        except Exception as e:
+            print(f"WARNING: Quantization failed: {e}")
+            
     return model
 
 @st.cache_resource

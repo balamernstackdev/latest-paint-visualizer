@@ -11,6 +11,7 @@ import requests
 import textwrap
 from PIL import Image
 from streamlit_drawable_canvas import st_canvas as raw_st_canvas
+from streamlit_image_comparison import image_comparison
 from .encoding import image_to_url_patch
 from .state_manager import cb_undo, cb_redo, cb_clear_all, cb_delete_layer, cb_apply_pending, cb_cancel_pending
 from .image_processing import get_crop_params, composite_image, process_lasso_path
@@ -1252,7 +1253,7 @@ def render_sidebar(sam, device_str):
                 #         import streamlit.components.v1 as components
                 #         components.html("<script>window.parent.STREAMLIT_POLY_POINTS = [];</script>", height=0)
                 if "Polygonal Lasso" in current_tool:
-                    st.caption("Instructions: **Double-click** to apply paint.")
+                    pass
                 elif "Lasso (Freehand)" in current_tool:
                     st.caption("Instructions: Draw your area. Paint applies when you release.")
             
@@ -1331,3 +1332,30 @@ def render_sidebar(sam, device_str):
                         #     mask_data['refinement'] = new_ref
                         #     st.session_state["render_id"] += 1
             else: st.caption("No active layers.")
+
+
+def render_comparison_slider():
+    
+    st.subheader('?? Compare Before / After')
+    
+    if st.session_state.get('image') is None:
+        return
+
+    original_img = st.session_state['image']
+    painted_img = composite_image(original_img, st.session_state['masks'])
+    
+    # Convert RGB to BGR for comparison component (if needed) or keep RGB
+    # image_comparison expects PIL or arrays
+    
+    image_comparison(
+        img1=original_img,
+        img2=painted_img,
+        label1='Original',
+        label2='Painted',
+        width=700,
+        starting_position=50,
+        show_labels=True,
+        make_responsive=True,
+        in_memory=True
+    )
+

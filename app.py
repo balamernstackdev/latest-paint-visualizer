@@ -399,5 +399,6 @@ def main():
     st.button("GLOBAL SYNC", key="global_sync_btn", help="Hidden sync for JS", type="secondary")
     st.markdown('<div class="global-sync-marker" style="display:none;" data-sync-id="global_sync"></div>', unsafe_allow_html=True)
 
+    
 if __name__ == "__main__":
     main()

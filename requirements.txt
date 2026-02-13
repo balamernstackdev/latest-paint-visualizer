@@ -1,6 +1,6 @@
 # AI Paint Visualizer - Production Requirements
 # Loosened version constraints for better Streamlit Cloud compatibility
-# Updated: 2026-02-09
+# Updated: 2026-02-13
 
 # Core Framework
 streamlit>=1.35.0
@@ -31,3 +31,7 @@ streamlit-drawable-canvas>=0.9.0
 
 # Utilities
 requests>=2.31.0
+
+# Database & Auth
+SQLAlchemy>=2.0.0
+bcrypt>=4.0.1

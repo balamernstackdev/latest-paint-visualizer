@@ -54,8 +54,22 @@ class SegmentationEngine:
         self.predictor.set_image(image_rgb)
         self.is_image_set = True
         self.image_rgb = image_rgb
-        print(f"DEBUG: SAM Engine {id(self)} - is_image_set = True ✅")
-        logger.info("Embeddings computed.")
+        
+        # --- PRE-COMPUTE FEATURES FOR FASTER CLICKS ---
+        # 1. Grayscale
+        self.image_gray = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2GRAY)
+        self.image_u16 = image_rgb.astype(np.uint16)
+        
+        # 2. Gaussian Blur (for small objects/edge detection)
+        k_size = SegmentationConfig.GAUSSIAN_KERNEL_SIZE
+        self.image_blurred = cv2.GaussianBlur(self.image_gray, k_size, 0)
+        
+        # 3. Lapalcian Edges (base)
+        edges = cv2.Laplacian(self.image_blurred, cv2.CV_16S, ksize=3)
+        self.image_edges_abs = cv2.convertScaleAbs(edges)
+        
+        print(f"DEBUG: SAM Engine {id(self)} - is_image_set = True ✅ (Features Pre-computed)")
+        logger.info("Embeddings and features computed.")
 
     def generate_mask(self, point_coords=None, point_labels=None, box_coords=None, level=None, is_wall_only=False, cleanup=True):
         is_small_object = False # Initialize to prevent UnboundLocalError in Box Mode
@@ -274,7 +288,7 @@ class SegmentationEngine:
                 # MEDIAN picks the dominant color, ignoring the outlier neighbor.
                 seed_color = np.median(seed_patch, axis=(0, 1))
                 
-                img_u16 = self.image_rgb.astype(np.uint16)
+                img_u16 = self.image_u16
                 intensity_raw = np.mean(img_u16, axis=2)
                 seed_intensity = np.mean(seed_color)
                 intensity_diff = intensity_raw - seed_intensity
@@ -299,10 +313,9 @@ class SegmentationEngine:
                      valid_mask = (color_diff < SegmentationConfig.COLOR_DIFF_BOX_MODE).astype(np.uint8)
                      
                      # Enable Edge Detection to snap to lines
-                     k_size = SegmentationConfig.GAUSSIAN_KERNEL_SIZE
-                     edge_gray = cv2.GaussianBlur(cv2.cvtColor(self.image_rgb, cv2.COLOR_RGB2GRAY), k_size, 0)
-                     edges = cv2.Laplacian(edge_gray, cv2.CV_16S, ksize=3)
-                     abs_edges = cv2.convertScaleAbs(edges)
+                     # Use pre-computed edges
+                     edge_barrier = 0
+                     _, edge_barrier = cv2.threshold(self.image_edges_abs, SegmentationConfig.EDGE_THRESHOLD_BOX_MODE, 255, cv2.THRESH_BINARY_INV)
                      _, edge_barrier = cv2.threshold(abs_edges, SegmentationConfig.EDGE_THRESHOLD_BOX_MODE, 255, cv2.THRESH_BINARY_INV) 
                      edge_barrier = (edge_barrier / 255).astype(np.uint8)
                      
@@ -343,10 +356,8 @@ class SegmentationEngine:
                             valid_mask = (color_diff < tol).astype(np.uint8) 
                             
                             # 2. Edge Barrier: Catches strong edges while allowing texture detail.
-                            k_size = SegmentationConfig.GAUSSIAN_KERNEL_SIZE
-                            edge_gray = cv2.GaussianBlur(cv2.cvtColor(self.image_rgb, cv2.COLOR_RGB2GRAY), k_size, 0)
-                            edges = cv2.Laplacian(edge_gray, cv2.CV_16S, ksize=3)
-                            abs_edges = cv2.convertScaleAbs(edges)
+                            # Use pre-computed
+                            abs_edges = self.image_edges_abs
                             
                             edge_thresh = SegmentationConfig.EDGE_THRESHOLD_WALL_MODE if is_wall_only else SegmentationConfig.EDGE_THRESHOLD_SMALL_OBJECT
                             _, edge_barrier = cv2.threshold(abs_edges, edge_thresh, 255, cv2.THRESH_BINARY_INV)
@@ -374,10 +385,7 @@ class SegmentationEngine:
                             valid_mask = (color_diff < tol).astype(np.uint8)
                             
                             # Edge detection: allows paint to flow over soft architectural edges but stops at strong object borders
-                            k_size = SegmentationConfig.GAUSSIAN_KERNEL_SIZE 
-                            edge_gray = cv2.GaussianBlur(cv2.cvtColor(self.image_rgb, cv2.COLOR_RGB2GRAY), k_size, 0)
-                            edges = cv2.Laplacian(edge_gray, cv2.CV_16S, ksize=3)
-                            abs_edges = cv2.convertScaleAbs(edges)
+                            abs_edges = self.image_edges_abs
                             
                             edge_thresh = SegmentationConfig.EDGE_THRESHOLD_WALL_MODE if is_wall_only else SegmentationConfig.EDGE_THRESHOLD_STANDARD_WALL
                             _, edge_barrier = cv2.threshold(abs_edges, edge_thresh, 255, cv2.THRESH_BINARY_INV)
