@@ -4,6 +4,8 @@ import cv2
 import numpy as np
 import torch
 import streamlit.components.v1 as components
+from scipy import sparse
+
 import logging
 import time
 import io
@@ -76,8 +78,13 @@ def cb_sidebar_tool_sync(widget_key=None):
         st.session_state["force_finish_poly"] = False
         st.session_state["loop_guarded"] = False
         
-        # Reset operation to "Add" on any tool switch
-        st.session_state["selection_op"] = "Add"
+        # Reset operation based on tool (Eraser defaults to Subtract)
+        if "Eraser" in new_tool:
+            st.session_state["selection_op"] = "Subtract"
+            st.session_state["sidebar_op_radio"] = "Subtract"
+        else:
+            st.session_state["selection_op"] = "Add"
+            st.session_state["sidebar_op_radio"] = "Add"
         
         # FIX: Defer JS clearing to the render loop to avoid callback reruns
         st.session_state["tool_switched_reset"] = True
@@ -1017,19 +1024,64 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                             print(f"DEBUG: Found Path - Cmds:{len(scaled_path)} Thickness:{stroke_width} MaskSum:{mask.sum()}")
                            
                             if mask.any():
-                                st.session_state["pending_selection"] = {'mask': mask}
+                                # ⚡ BRUSH MERGING LOGIC:
+                                # Try to merge with the last layer if it's also a brush layer of the same color
+                                color = st.session_state.get("picked_color", "#8FBC8F")
+                                op = st.session_state.get("selection_op", "Add")
                                 
-                                # Set operation mode
-                                if "Eraser" in tool_mode:
-                                     st.session_state["selection_op"] = "Subtract"
-                                     st.session_state["sidebar_op_radio"] = "Subtract"
+                                merged = False
+                                if st.session_state["masks"]:
+                                    last_layer = st.session_state["masks"][-1]
+                                    # Check if compatible for merging
+                                    is_brush_layer = last_layer.get("type") == "brush"
+                                    is_same_color = last_layer.get("color") == color
+                                    # We didn't store op specifically before, but brush layers are usually additive unless labeled
+                                    # Let's start storing 'op' in layer metadata for robust merging
+                                    is_same_op = last_layer.get("op", "Add") == op 
+                                    
+                                    if is_brush_layer and is_same_color and is_same_op:
+                                        # Merge mask
+                                        target_mask = last_layer['mask']
+                                        if sparse.issparse(target_mask): target_mask = target_mask.toarray()
+                                        
+                                        if op == "Add":
+                                            last_layer['mask'] = target_mask | mask
+                                        else:
+                                            # For subtract, we are likely erasing from previous layers.
+                                            # However, if we are in 'Eraser Mode' and just did a stroke, 
+                                            # and now do another stroke, we probably want to combine these 
+                                            # two 'Eraser Strokes' into one big 'Eraser Action'?
+                                            # Actually, 'Subtract' operation usually applies immediately to ALL layers in cb_apply_pending.
+                                            # So merging 'Subtract' strokes doesn't make sense the same way 'Add' does 
+                                            # because 'Subtract' is destructive and doesn't create a new layer to merge into.
+                                            # It modifies existing layers.
+                                            pass 
+                                        
+                                        # ONLY Merge 'Add' operations. 'Subtract' operations are applied destructively to all layers instantly.
+                                        if op == "Add":
+                                            # Invalidate cache for this layer
+                                            if "flattened_cache" in st.session_state:
+                                                st.session_state["flattened_cache"] = st.session_state["flattened_cache"][:-1]
+                                                
+                                            merged = True
+                                            print(f"DEBUG: Merged brush stroke into Layer {len(st.session_state['masks'])}")
+
+                                if not merged:
+                                    # Standard new layer if no merge possible
+                                    st.session_state["pending_selection"] = {'mask': mask}
+                                    
+                                    # Respect global operation mode (Add/Subtract)
+                                    cb_apply_pending(increment_canvas=True)
+                                    
+                                    # Tag as brush layer for future merges (Only if it was an ADD operation that created a layer)
+                                    if st.session_state["masks"] and op == "Add":
+                                        st.session_state["masks"][-1]["type"] = "brush"
+                                        st.session_state["masks"][-1]["op"] = op
                                 else:
-                                     st.session_state["selection_op"] = "Add"
-                                     st.session_state["sidebar_op_radio"] = "Add"
-                                     
-                                cb_apply_pending()
-                                st.session_state["canvas_id"] = st.session_state.get("canvas_id", 0) + 1
-                                st.session_state["render_id"] += 1
+                                     # Manually increment if we skipped cb_apply_pending
+                                    st.session_state["canvas_id"] = st.session_state.get("canvas_id", 0) + 1
+                                    st.session_state["render_id"] += 1
+                                
                                 safe_rerun()
                         break 
 
@@ -1049,7 +1101,7 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                              
                              if mask is not None and mask.any():
                                  st.session_state["pending_selection"] = {'mask': mask}
-                                 st.session_state["selection_op"] = "Add" # Default to Add
+                                 # Respect global operation mode (Add/Subtract)
                                  
                                  cb_apply_pending()
                                  st.session_state["canvas_id"] = st.session_state.get("canvas_id", 0) + 1
@@ -1238,27 +1290,35 @@ def render_sidebar(sam, device_str):
 
         if st.session_state.get("image") is not None:
             if st.session_state["masks"]:
-                if st.button("💎 Prepare High-Res Download", use_container_width=True):
-                    st.toast("Processing 4K Export...", icon="💎")
+                if st.button("💎 PREPARE HIGH-RES DOWNLOAD", use_container_width=True, type="primary"):
+                    st.toast("🎨 Professional Rendering in Progress...", icon="💎")
                     try:
                         original_img = st.session_state["image_original"]
                         oh, ow = original_img.shape[:2]
                         high_res_masks = []
-                        for m_data in st.session_state["masks"]:
+                        total = len(st.session_state["masks"])
+                        progress_bar = st.progress(0)
+                        for i, m_data in enumerate(st.session_state["masks"]):
+                            progress_bar.progress((i + 1) / total)
                             # 1. Prepare Mask
                             raw_mask = m_data['mask']
                             from scipy import sparse
                             if sparse.issparse(raw_mask):
                                 raw_mask = raw_mask.toarray()
                             
-                            # 2. Resize to full resolution
-                            mask_uint8 = (raw_mask * 255).astype(np.uint8)
-                            hr_mask_uint8 = cv2.resize(mask_uint8, (ow, oh), interpolation=cv2.INTER_NEAREST)
+                            # 2. Resize to full resolution with SMOOTHING
+                            mask_f32 = raw_mask.astype(np.float32)
+                            hr_mask_f32 = cv2.resize(mask_f32, (ow, oh), interpolation=cv2.INTER_LINEAR)
+                            
+                            # Apply smoothing to upscaled mask to prevent blockiness
+                            blur_k = max(1, int(ow / 800)) * 2 + 1
+                            hr_mask_smooth = cv2.GaussianBlur(hr_mask_f32, (blur_k, blur_k), 0)
                             
                             # 3. Create high-res layer obj
                             hr_m = m_data.copy()
-                            hr_m['mask'] = hr_mask_uint8 > 127
+                            hr_m['mask'] = hr_mask_smooth > 0.4 
                             high_res_masks.append(hr_m)
+                        progress_bar.empty()
                         from core.colorizer import ColorTransferEngine
                         dl_comp = ColorTransferEngine.composite_multiple_layers(original_img, high_res_masks)
                         dl_pil = Image.fromarray(dl_comp)
@@ -1301,18 +1361,12 @@ def render_sidebar(sam, device_str):
             if "selection_tool" in st.session_state:
                 print(f"DEBUG: SIDEBAR RENDER -> Tool: {st.session_state['selection_tool']}, Radio Key: {radio_key}")
             
-            # 🎯 HIDE OPERATION FOR BRUSH/ERASER (They have specific built-in ops)
-            if "Paint Brush" in current_tool:
-                st.session_state["selection_op"] = "Add"
-            elif "Eraser" in current_tool:
-                st.session_state["selection_op"] = "Subtract"
-
-            if "Paint Brush" not in current_tool and "Eraser" not in current_tool:
-                st.radio("Operation", ["Add", "Subtract"], 
-                                        horizontal=True, 
-                                        index=0 if st.session_state.get("selection_op") == "Add" else 1,
-                                        key="sidebar_op_radio",
-                                        on_change=cb_sidebar_op_sync)
+            # 🎯 HIDE OPERATION FOR BRUSH/ERASER - REPLACED: Now available for all tools
+            st.radio("Operation", ["Add", "Subtract"], 
+                                    horizontal=True, 
+                                    index=0 if st.session_state.get("selection_op") == "Add" else 1,
+                                    key="sidebar_op_radio",
+                                    on_change=cb_sidebar_op_sync)
             
             # --- Tool Specific Controls (Full Width) ---
             # --- Tool Specific Controls (Full Width) ---

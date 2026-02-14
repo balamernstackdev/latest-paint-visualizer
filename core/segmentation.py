@@ -214,13 +214,13 @@ class SegmentationEngine:
                         mask_area = np.sum(best_mask)
                         area_ratio = mask_area / image_area
                         
-                        # Smaller objects need more aggressive erosion
+                        # REDUCED EROSION STRENGTH to prevent gaps (User Feedback)
                         if area_ratio < 0.05:  # Very small (< 5%)
-                            kernel_size = 3    # Reduced from 4
-                            iterations = 1     # Reduced from 2 to preserve lattice details
+                            kernel_size = 3    
+                            iterations = 1     
                         elif area_ratio < 0.10:  # (Small < 10%)
                             kernel_size = 3
-                            iterations = 2
+                            iterations = 1      # Reduced from 2
                         elif area_ratio < 0.15:  # Medium small (< 15%)
                             kernel_size = 3
                             iterations = 1
@@ -228,10 +228,13 @@ class SegmentationEngine:
                             kernel_size = 3
                             iterations = 1
                         
-                        erode_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
-                        best_mask = cv2.erode(best_mask.astype(np.uint8), erode_kernel, iterations=iterations).astype(bool)
-                        
-                        print(f"Applied erosion: kernel={kernel_size}x{kernel_size}, iterations={iterations}")
+                        # Only apply if ratio is significant enough to warrant it (skip for tiny details)
+                        if area_ratio > 0.005:
+                            erode_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+                            best_mask = cv2.erode(best_mask.astype(np.uint8), erode_kernel, iterations=iterations).astype(bool)
+                            print(f"Applied erosion: kernel={kernel_size}x{kernel_size}, iterations={iterations}")
+                        else:
+                            print(f"Skipped erosion for tiny object (ratio={area_ratio:.4f})")
                     
                     # If no mask looks like a door (score < 3), use default behavior
                     if best_door_score < 3:

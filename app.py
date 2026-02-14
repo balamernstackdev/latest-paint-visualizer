@@ -9,10 +9,11 @@ import warnings
 import logging
 import numpy as np
 import cv2
+from scipy import sparse
 
 # 🎯 CRITICAL: Must be the VERY FIRST Streamlit command
 st.set_page_config(
-    page_title="Color Visualizer Studio",
+    page_title="Paint Visualizer",
     page_icon="🎨",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -154,13 +155,21 @@ def main():
                              if layer.get("visible", True):
                                  # Apply subtraction: Keep existing True only if New is False
                                  # Resize to match execution context
+                                 # Resize to match execution context
                                  target_mask = layer['mask']
+                                 if sparse.issparse(target_mask):
+                                     target_mask = target_mask.toarray()
+
                                  mask_to_subtract = accumulated_mask
                                  if target_mask.shape != mask_to_subtract.shape:
                                      mask_to_subtract = cv2.resize(mask_to_subtract.astype(np.uint8), (target_mask.shape[1], target_mask.shape[0]), interpolation=cv2.INTER_NEAREST) > 0
                                  
                                  before_count = np.sum(target_mask)
-                                 layer['mask'] = target_mask & ~mask_to_subtract
+                                 # Convert result back to boolean just in case
+                                 result_mask = (target_mask > 0) & ~mask_to_subtract
+                                 
+                                 # Optional: Compress if it was sparse? For now keep it simple/robust
+                                 layer['mask'] = result_mask
                                  if np.sum(layer['mask']) < before_count:
                                      cleaned_any = True
                          
@@ -247,9 +256,12 @@ def main():
                     st.session_state["pending_selection"] = {'mask': mask, 'point': (real_x, real_y)}
                     
                     # Set Op for Magic Wand (default to sidebar op if not eraser)
-                    st.session_state["selection_op"] = st.session_state.get("sidebar_op_radio", "Add")
+                    # Use current radio selection
+                    st.session_state["selection_op"] = st.session_state.get("selection_op", "Add")
                     
-                    cb_apply_pending(increment_canvas=False, silent=True) # Stable Canvas Key
+                    # ⚡ INSTANT APPLY Logic
+                    # Magic Wand and AI Click are now 'one-click' tools
+                    cb_apply_pending(increment_canvas=False, silent=True)
                     st.session_state["render_id"] += 1
                     print(f"DEBUG: Top-Level Tap Success at ({real_x},{real_y}) using mode: {tool_mode}")
         
@@ -349,7 +361,11 @@ def main():
                          for layer in st.session_state["masks"]:
                              if layer.get("visible", True):
                                  # Apply subtraction: Keep existing True only if New is False
-                                 layer['mask'] = layer['mask'] & ~mask
+                                 target_mask = layer['mask']
+                                 if sparse.issparse(target_mask):
+                                     target_mask = target_mask.toarray()
+                                     
+                                 layer['mask'] = (target_mask > 0) & ~mask
                                  cleaned_any = True
                          
                          if cleaned_any:
