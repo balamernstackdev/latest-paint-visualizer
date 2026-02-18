@@ -131,7 +131,7 @@
                 position: 'absolute',
                 top: '0', left: '0', width: '100%', height: '100%',
                 zIndex: '999',
-                touchAction: 'pan-y', // 📱 Allow vertical scrolling
+                touchAction: 'pinch-zoom', // 📱 Allow pinch-zoom but block pan (for drawing)
                 display: 'none',
                 cursor: 'crosshair',
                 overflow: 'visible'
@@ -524,7 +524,7 @@
                         position: relative;
                         margin: 0 auto !important;
                         display: block !important;
-                        touch-action: none;
+                        touch-action: pinch-zoom;
                         overflow: visible;
                     `;
 
@@ -535,7 +535,7 @@
                         transform-origin: top left;
                         position: absolute;
                         top: 0; left: 0;
-                        touch-action: none;
+                        touch-action: pinch-zoom;
                         opacity: 1;
                         transition: opacity 0.2s;
                     `;

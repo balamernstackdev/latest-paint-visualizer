@@ -234,7 +234,7 @@ def setup_styles():
         iframe[title="streamlit_drawable_canvas.st_canvas"], 
         .element-container iframe,
         [id$="-overlay"] {{
-            touch-action: none !important;
+            touch-action: pinch-zoom !important;
         }}
         
         [data-testid="stSidebar"] {{
@@ -312,7 +312,7 @@ def setup_styles():
         iframe[title="streamlit_drawable_canvas.st_canvas"], 
         .element-container iframe,
         [id$="-overlay"] {{
-            touch-action: none !important;
+            touch-action: pinch-zoom !important;
         }}
 
         [data-testid="stSidebar"] {{
