@@ -488,6 +488,7 @@
     }
 
     function applyResponsiveScale() {
+        if (window.isCanvasGesturing) return; // 🛑 DON'T FIGHT WITH GESTURE PREVIEW
         try {
             const iframes = parent.document.getElementsByTagName('iframe');
             if (!iframes.length) return;
@@ -515,6 +516,7 @@
                     iframe.style.transformOrigin = "top left";
                     iframe.style.position = "absolute";
                     iframe.style.touchAction = "none";
+                    iframe.style.transition = 'transform 0.1s ease-out';
                 }
             }
         } catch (e) { }
@@ -817,74 +819,87 @@
             this.initialPan = { x: 0.5, y: 0.5 };
             this.initialMid = { x: 0, y: 0 };
             this.isGesturing = false;
-            this.targetEl = null;
-            this._lastSyncedZ = 1.0;
-            this._lastSyncedX = 0.5;
-            this._lastSyncedY = 0.5;
+
+            this._currentZ = 1.0;
+            this._currentX = 0.5;
+            this._currentY = 0.5;
         }
 
         attach(el) {
-            this.targetEl = el;
             el.addEventListener('touchstart', (e) => {
+                const cfg = window.CANVAS_CONFIG || {};
                 if (e.touches.length === 2) {
-                    e.preventDefault(); // 🛑 BLOCK BROWSER ZOOM START
+                    e.preventDefault();
                     const t1 = e.touches[0], t2 = e.touches[1];
                     this.initialDist = Math.hypot(t1.pageX - t2.pageX, t1.pageY - t2.pageY);
-                    this.initialMid = { x: (t1.pageX + t2.pageX) / 2, y: (t1.pageY + t2.pageY) / 2 };
-                    this.initialZoom = config.ZOOM_LEVEL || 1.0;
-                    this.initialPan = { x: config.CUR_PAN_X || 0.5, y: config.CUR_PAN_Y || 0.5 };
+
+                    const rect = el.getBoundingClientRect();
+                    this.initialMid = {
+                        x: (t1.clientX + t2.clientX) / 2 - rect.left,
+                        y: (t1.clientY + t2.clientY) / 2 - rect.top
+                    };
+
+                    this.initialZoom = cfg.ZOOM_LEVEL || 1.0;
+                    this.initialPan = { x: cfg.CUR_PAN_X || 0.5, y: cfg.CUR_PAN_Y || 0.5 };
+
+                    this._currentZ = this.initialZoom;
+                    this._currentX = this.initialPan.x;
+                    this._currentY = this.initialPan.y;
+
                     this.isGesturing = true;
                     window.isCanvasGesturing = true;
 
-                    this._lastSyncedZ = this.initialZoom;
-                    this._lastSyncedX = this.initialPan.x;
-                    this._lastSyncedY = this.initialPan.y;
-
-                    // PREVIEW START: Target the wrapper but apply transform to IFRAME for smoothness
                     const iframe = getActiveIframe();
-                    if (iframe) {
-                        iframe.style.transition = 'none'; // Disable transitions during gesture
-                    }
+                    if (iframe) iframe.style.transition = 'none';
                 }
             }, { passive: false });
 
             el.addEventListener('touchmove', (e) => {
                 if (this.isGesturing && e.touches.length === 2) {
-                    e.preventDefault(); // 🛑 BLOCK BROWSER ZOOM MOVE
+                    e.preventDefault();
+                    const cfg = window.CANVAS_CONFIG || {};
                     const t1 = e.touches[0], t2 = e.touches[1];
                     const dist = Math.hypot(t1.pageX - t2.pageX, t1.pageY - t2.pageY);
-                    const mid = { x: (t1.pageX + t2.pageX) / 2, y: (t1.pageY + t2.pageY) / 2 };
+
+                    const rect = el.getBoundingClientRect();
+                    const mid = {
+                        x: (t1.clientX + t2.clientX) / 2 - rect.left,
+                        y: (t1.clientY + t2.clientY) / 2 - rect.top
+                    };
 
                     const gestureScale = dist / this.initialDist;
                     const newZoom = Math.max(1.0, Math.min(4.0, this.initialZoom * gestureScale));
 
+                    // Pan calculation should be relative to screen pixels
                     const dx_px = mid.x - this.initialMid.x;
                     const dy_px = mid.y - this.initialMid.y;
 
-                    // Calculate Panning (normalized 0-1)
-                    const pan_sens = 1.0 / (config.ZOOM_LEVEL || 1.0);
-                    const newPanX = Math.max(0, Math.min(1, this.initialPan.x - (dx_px / CANVAS_WIDTH) * pan_sens));
-                    const newPanY = Math.max(0, Math.min(1, this.initialPan.y - (dy_px / CANVAS_HEIGHT) * pan_sens));
+                    // Normalized movement: how much of the VISUAL container did we move?
+                    const normDx = dx_px / rect.width;
+                    const normDy = dy_px / rect.height;
 
-                    this._lastSyncedZ = newZoom;
-                    this._lastSyncedX = newPanX;
-                    this._lastSyncedY = newPanY;
+                    // Apply to pan center (sensitive to current zoom)
+                    const panSens = 1.0 / this.initialZoom;
+                    const newPanX = Math.max(0, Math.min(1, this.initialPan.x - normDx * panSens));
+                    const newPanY = Math.max(0, Math.min(1, this.initialPan.y - normDy * panSens));
 
-                    // --- SMOOTH CSS PREVIEW ---
+                    this._currentZ = newZoom;
+                    this._currentX = newPanX;
+                    this._currentY = newPanY;
+
+                    // --- CSS PREVIEW ---
                     const iframe = getActiveIframe();
                     if (iframe) {
                         const baseScale = Math.min(1.0, (parent.window.innerWidth - 20) / CANVAS_WIDTH);
-                        const visualScale = baseScale * gestureScale;
-                        const vdx = mid.x - this.initialMid.x;
-                        const vdy = mid.y - this.initialMid.y;
-                        iframe.style.transform = `translate(${vdx}px, ${vdy}px) scale(${visualScale})`;
-                    }
 
-                    // Throttled backend update (keep it slow to avoid UI lag)
-                    const now = Date.now();
-                    if (now - this.lastUpdate > 300) {
-                        this.sync(newZoom, newPanX, newPanY);
-                        this.lastUpdate = now;
+                        // Set origin to the start-midpoint of the pinch for natural feel
+                        iframe.style.transformOrigin = `${this.initialMid.x / baseScale}px ${this.initialMid.y / baseScale}px`;
+
+                        // Combine base scale with new pinch scale
+                        const visualScale = baseScale * gestureScale;
+
+                        // translate(...) moves the image with the midpoint shift
+                        iframe.style.transform = `translate(${dx_px}px, ${dy_px}px) scale(${visualScale})`;
                     }
                 }
             }, { passive: false });
@@ -894,30 +909,11 @@
                     this.isGesturing = false;
                     window.isCanvasGesturing = false;
                     window.lastPinchTime = Date.now();
-                    this.commitFinal();
+
+                    // Final commit to backend
+                    this.sync(this._currentZ, this._currentX, this._currentY);
                 }
             });
-        }
-
-        commitFinal() {
-            // Re-calculate the final values based on current position if possible, 
-            // but for simplicity we'll use the tracked visual values.
-            // (In a more complex app we'd calculate them precisely)
-
-            // For now, let's just trigger the sync with the last known values
-            // but we need to ensure they are updated.
-            // Since touchmove updates them, we jump to results.
-
-            const iframe = getActiveIframe();
-            if (iframe) {
-                iframe.style.transition = 'transform 0.3s ease-out';
-                // Note: triggerRerun will happen soon, which replaces the iframe, so transition is mostly for feel.
-            }
-
-            // Extract from URL or tracked state? tracked state is better.
-            if (this._lastSyncedZ) {
-                this.sync(this._lastSyncedZ, this._lastSyncedX, this._lastSyncedY);
-            }
         }
 
         sync(z, px, py) {
