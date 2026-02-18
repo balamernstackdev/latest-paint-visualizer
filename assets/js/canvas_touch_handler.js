@@ -67,28 +67,38 @@
     
         // 🤏 GLOBAL PINCH HANDLER
         // 🤏 GLOBAL PINCH & PAN HANDLER (Custom JS)
+        // 🤏 GLOBAL PINCH & PAN HANDLER (Centric Zoom)
     const handlePinch = (e) => {
         if (e.touches.length === 2) {
             window.isCanvasGesturing = true;
             
             const t1 = e.touches[0];
             const t2 = e.touches[1];
+            
+            // Current Distance
             const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+            
+            // Current Center
             const cx = (t1.clientX + t2.clientX) / 2;
             const cy = (t1.clientY + t2.clientY) / 2;
 
             if (window.lastPinchDist > 0) {
-                // ZOOM
+                // ZOOM CALCULATION
                 const delta = dist / window.lastPinchDist;
                 let newZoom = (window.userZoomLevel || 1.0) * delta;
-                if (newZoom < 1.0) newZoom = 1.0;
-                if (newZoom > 5.0) newZoom = 5.0; // Max Scale
+                
+                // Safety Limits
+                if (newZoom < 0.5) newZoom = 0.5;   // Allow slight undershoot
+                if (newZoom > 8.0) newZoom = 8.0;   // Higher Max Zoom
+                
                 window.userZoomLevel = newZoom;
                 
-                // PAN
+                // PAN CALCULATION (From Finger Movement)
                 if (window.lastPinchCenter && window.lastPinchCenter.x) {
                     const dx = cx - window.lastPinchCenter.x;
                     const dy = cy - window.lastPinchCenter.y;
+                    
+                    // Simple additive pan (1:1 movement)
                     window.panX = (window.panX || 0) + dx;
                     window.panY = (window.panY || 0) + dy;
                 }
@@ -96,6 +106,7 @@
                 applyResponsiveScale();
             }
             
+            // Update State
             window.lastPinchDist = dist;
             window.lastPinchCenter = { x: cx, y: cy };
             window.lastPinchTime = Date.now();
@@ -561,7 +572,7 @@
         }
     }
 
-            function applyResponsiveScale() {
+                function applyResponsiveScale() {
         if (window.isCanvasGesturing) return; 
         try {
             const iframes = parent.document.getElementsByTagName('iframe');
@@ -575,42 +586,53 @@
             const targetWidth = winW < 1024 ? winW - 4 : winW - 40;
             if (targetWidth <= 50 || !CANVAS_WIDTH) return;
 
-            // BASE Scale (to fit screen initially)
+            // BASE Scale (Fit to Logic)
             let baseScale = targetWidth / CANVAS_WIDTH;
             if (baseScale < 0.1) baseScale = 0.1;
             
-            // USER Zoom (multiplied)
+            // Combined Scale
             let totalScale = baseScale * (window.userZoomLevel || 1.0);
+            
+            // Pan Values
+            let px = window.panX || 0;
+            let py = window.panY || 0;
 
             for (let iframe of iframes) {
                 if (iframe.title === "streamlit_drawable_canvas.st_canvas" || iframe.src.includes('streamlit_drawable_canvas')) {
                     const wrapper = iframe.parentElement;
                     if (!wrapper) continue;
 
-                    // Wrapper stays at base size (or should it grow? No, wrapper is viewport)
-                    // If wrapper grows, layout breaks. Wrapper should be fixed size (viewport).
-                    // Canvas transforms INSIDE wrapper.
-                    // Actually, if we want to pan, wrapper should clip? yes.
-                    
+                    // Wrapper: Fixed Viewport
                     wrapper.style.cssText = `
                         width: ${Math.floor(CANVAS_WIDTH * baseScale)}px;
                         height: ${Math.floor(CANVAS_HEIGHT * baseScale)}px;
                         position: relative;
                         margin: 0 auto !important;
                         display: block !important;
-                        overflow: hidden; /* Clip the zoomed content */
+                        overflow: hidden; /* ✂️ Clip zoomed content */
                         touch-action: none;
+                        user-select: none;
+                        -webkit-user-select: none;
                     `;
 
+                    // Iframe: Centered & Scaled
+                    // transform-origin: center center ensures zoom grows from middle
+                    // translate(-50%, -50%) centers it initially
+                    // translate(px, py) applies user pan
+                    // scale(totalScale) checks zoom
+                    
                     iframe.style.cssText = `
                         width: ${CANVAS_WIDTH}px;
                         height: ${CANVAS_HEIGHT}px;
-                        transform: translate(${window.panX || 0}px, ${window.panY || 0}px) scale(${totalScale});
-                        transform-origin: top left;
                         position: absolute;
-                        top: 0; left: 0;
+                        top: 50%; 
+                        left: 50%;
+                        transform-origin: center center; 
+                        transform: translate(-50%, -50%) translate(${px}px, ${py}px) scale(${totalScale});
+                        will-change: transform;
                         touch-action: none;
                         opacity: 1;
+                        border: none;
                     `;
                 }
             }
