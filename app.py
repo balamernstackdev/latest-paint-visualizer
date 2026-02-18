@@ -38,6 +38,8 @@ initialize_session_state()
 
 # --- WARNING SHIELD: Titanium Silence v4 ---
 st.components.v1.html("""
+    <!-- 📱 MOBILE OPTIMIZATION -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
     <script>
         (function() {
             const silence = (w) => {

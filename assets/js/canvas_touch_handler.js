@@ -35,6 +35,10 @@
     window.isCanvasGesturing = false;
     window.lastPinchTime = 0;
     window.activePointers = new Map();
+    window.userZoomLevel = 1.0;
+    window.panX = 0;
+    window.panY = 0;
+    window.lastPinchDist = 0;
 
     // 🛡️ SUPER-STRICT GESTURE INTERCEPTOR (Parent Level)
     // We catch touchstart on the parent to block iframe click logic immediately
@@ -42,6 +46,8 @@
         window.parent.document.addEventListener('touchstart', e => {
             if (e.touches.length > 1) {
                 window.isCanvasGesturing = true;
+            window.lastPinchDist = Math.hypot(e.touches[1].clientX - e.touches[0].clientX, e.touches[1].clientY - e.touches[0].clientY);
+            window.lastPinchCenter = { x: (e.touches[0].clientX + e.touches[1].clientX) / 2, y: (e.touches[0].clientY + e.touches[1].clientY) / 2 };
             }
         }, { capture: true, passive: true });
     } catch (e) { }
@@ -57,6 +63,66 @@
         el.addEventListener('pointerup', e => window.activePointers.delete(e.pointerId));
         el.addEventListener('pointercancel', e => window.activePointers.delete(e.pointerId));
     };
+
+    
+    // 🤏 GLOBAL PINCH HANDLER
+    const handlePinch = (e) => {
+        if (e.touches.length === 2) {
+            window.isCanvasGesturing = true;
+            window.lastPinchDist = Math.hypot(e.touches[1].clientX - e.touches[0].clientX, e.touches[1].clientY - e.touches[0].clientY);
+            window.lastPinchCenter = { x: (e.touches[0].clientX + e.touches[1].clientX) / 2, y: (e.touches[0].clientY + e.touches[1].clientY) / 2 };
+            const t1 = e.touches[0];
+            const t2 = e.touches[1];
+            const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+            
+            if (window.lastPinchDist > 0) {
+                // ZOOM
+                const delta = dist / window.lastPinchDist;
+                let newZoom = (window.userZoomLevel || 1.0) * delta;
+                if (newZoom < 1.0) newZoom = 1.0;
+                if (newZoom > 5.0) newZoom = 5.0;
+                window.userZoomLevel = newZoom;
+                
+                // PAN
+                const cx = (t1.clientX + t2.clientX) / 2;
+                const cy = (t1.clientY + t2.clientY) / 2;
+                
+                if (window.lastPinchCenter) {
+                    const dx = cx - window.lastPinchCenter.x;
+                    const dy = cy - window.lastPinchCenter.y;
+                    window.panX = (window.panX || 0) + dx;
+                    window.panY = (window.panY || 0) + dy;
+                }
+                window.lastPinchCenter = { x: cx, y: cy };
+
+                applyResponsiveScale();
+            }
+                }
+            }
+            window.lastPinchDist = dist;
+            window.lastPinchTime = Date.now();
+            e.preventDefault(); 
+            e.stopPropagation();
+        }
+    };
+
+    // Attach to parent to catch events before they hit iframe
+    try {
+        window.parent.document.addEventListener('touchmove', handlePinch, { capture: true, passive: false });
+        window.parent.document.addEventListener('touchend', e => {
+            if (e.touches.length < 2) {
+                window.lastPinchDist = 0;
+                setTimeout(() => window.isCanvasGesturing = false, 300);
+            }
+        }, { capture: true });
+        
+        // Also attach to local window just in case
+        window.addEventListener('touchmove', handlePinch, { capture: true, passive: false });
+        window.addEventListener('touchend', e => {
+             if (e.touches.length < 2) window.lastPinchDist = 0;
+        }, { capture: true });
+        
+    } catch (e) {}
 
     // Config Check
     let config = window.CANVAS_CONFIG || (window.parent ? window.parent.CANVAS_CONFIG : null);
@@ -140,7 +206,7 @@
                 position: 'absolute',
                 top: '0', left: '0', width: '100%', height: '100%',
                 zIndex: '999',
-                touchAction: 'pinch-zoom', // 📱 Allow pinch-zoom but block pan (for drawing)
+                touchAction: 'none', // 📱 Allow pinch-zoom but block pan (for drawing)
                 display: 'none',
                 cursor: 'crosshair',
                 overflow: 'visible'
@@ -514,12 +580,12 @@
             const targetWidth = winW < 1024 ? winW - 4 : winW - 40;
             if (targetWidth <= 50 || !CANVAS_WIDTH) return; // 🛡️ Safety: Don't scale if width is tiny (race condition)
 
-            let scale = targetWidth / CANVAS_WIDTH;
+            let scale = (targetWidth / CANVAS_WIDTH) * (window.userZoomLevel || 1.0);
 
             // 🛡️ CRITICAL SAFETY FLOOR: Never shrink image below 10% of screen
             // This prevents the "tiny image" bug shown in the screenshot.
             if (scale < 0.1) scale = 0.1;
-            if (scale > 1.0) scale = 1.0;
+            // if (scale > 1.0) scale = 1.0; // ALLOW ZOOM > 1.0
 
             for (let iframe of iframes) {
                 if (iframe.title === "streamlit_drawable_canvas.st_canvas" || iframe.src.includes('streamlit_drawable_canvas')) {
@@ -533,18 +599,18 @@
                         position: relative;
                         margin: 0 auto !important;
                         display: block !important;
-                        touch-action: pinch-zoom;
+                        touch-action: none;
                         overflow: visible;
                     `;
 
                     iframe.style.cssText = `
                         width: ${CANVAS_WIDTH}px;
                         height: ${CANVAS_HEIGHT}px;
-                        transform: scale(${scale});
+                        transform: translate(${window.panX || 0}px, ${window.panY || 0}px) scale(${scale});
                         transform-origin: top left;
                         position: absolute;
                         top: 0; left: 0;
-                        touch-action: pinch-zoom;
+                        touch-action: none;
                         opacity: 1;
                         transition: opacity 0.2s;
                     `;
@@ -865,6 +931,8 @@
                     e.preventDefault();
                     this.isGesturing = true;
                     window.isCanvasGesturing = true;
+            window.lastPinchDist = Math.hypot(e.touches[1].clientX - e.touches[0].clientX, e.touches[1].clientY - e.touches[0].clientY);
+            window.lastPinchCenter = { x: (e.touches[0].clientX + e.touches[1].clientX) / 2, y: (e.touches[0].clientY + e.touches[1].clientY) / 2 };
 
                     const t1 = e.touches[0], t2 = e.touches[1];
                     // 📏 Use clientX/Y to match getBoundingClientRect (Viewport coords)

@@ -234,10 +234,18 @@ def setup_styles():
         iframe[title="streamlit_drawable_canvas.st_canvas"], 
         .element-container iframe,
         [id$="-overlay"] {{
-            touch-action: pinch-zoom !important;
+            touch-action: none !important;
             -webkit-touch-callout: none !important;
             -webkit-user-select: none !important;
             user-select: none !important;
+            -webkit-user-drag: none !important;
+            user-drag: none !important;
+            pointer-events: auto !important;
+        }}
+
+        /* 🛑 GLOBAL CONTEXT MENU KILLER */
+        html, body, .stApp {{
+            -webkit-touch-callout: none !important;
         }}
         
         [data-testid="stSidebar"] {{
@@ -315,10 +323,18 @@ def setup_styles():
         iframe[title="streamlit_drawable_canvas.st_canvas"], 
         .element-container iframe,
         [id$="-overlay"] {{
-            touch-action: pinch-zoom !important;
+            touch-action: none !important;
             -webkit-touch-callout: none !important;
             -webkit-user-select: none !important;
             user-select: none !important;
+            -webkit-user-drag: none !important;
+            user-drag: none !important;
+            pointer-events: auto !important;
+        }}
+
+        /* 🛑 GLOBAL CONTEXT MENU KILLER */
+        html, body, .stApp {{
+            -webkit-touch-callout: none !important;
         }}
 
         [data-testid="stSidebar"] {{
