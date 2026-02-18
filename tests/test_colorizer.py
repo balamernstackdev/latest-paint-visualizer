@@ -8,7 +8,7 @@ and multi-layer compositing.
 import pytest
 import numpy as np
 import cv2
-from core.colorizer import ColorTransferEngine
+from paint_core.colorizer import ColorTransferEngine
 
 
 class TestHexToRGB:

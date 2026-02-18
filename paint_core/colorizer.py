@@ -7,7 +7,7 @@ from app_config.constants import ColorizerConfig
 
 # Try to import adaptive processing, but make it optional
 try:
-    from core.adaptive_processing import (
+    from .adaptive_processing import (
         get_adaptive_blur_kernel,
         apply_bilateral_blur,
         classify_object,

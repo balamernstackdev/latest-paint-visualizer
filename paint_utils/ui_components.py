@@ -1426,7 +1426,7 @@ def render_sidebar(sam, device_str):
                             hr_m['mask'] = hr_mask_smooth > 0.4 
                             high_res_masks.append(hr_m)
                         progress_bar.empty()
-                        from core.colorizer import ColorTransferEngine
+                        from paint_core.colorizer import ColorTransferEngine
                         dl_comp = ColorTransferEngine.composite_multiple_layers(original_img, high_res_masks)
                         dl_pil = Image.fromarray(dl_comp)
                         dl_buf = io.BytesIO()

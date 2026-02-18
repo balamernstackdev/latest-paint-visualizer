@@ -30,7 +30,7 @@ from paint_utils.sam_loader import get_sam_engine, ensure_model_exists, CHECKPOI
 from paint_utils.state_manager import initialize_session_state, cb_apply_pending
 from paint_utils.ui_components import setup_styles, render_sidebar, render_visualizer_engine_v11, TOOL_MAPPING
 from paint_utils.image_processing import get_crop_params, magic_wand_selection
-from core.segmentation import SegmentationEngine, sam_model_registry
+from paint_core.segmentation import SegmentationEngine, sam_model_registry
 from app_config.constants import PerformanceConfig
 
 # --- 1️⃣ SESSION INITIALIZATION (VERY TOP)

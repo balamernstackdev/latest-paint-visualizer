@@ -8,7 +8,7 @@ and mask refinement logic.
 import pytest
 import numpy as np
 from unittest.mock import Mock, patch
-from core.segmentation import SegmentationEngine
+from paint_core.segmentation import SegmentationEngine
 
 
 class TestSegmentationEngineInit:

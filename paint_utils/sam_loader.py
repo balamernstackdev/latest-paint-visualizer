@@ -2,7 +2,7 @@ import os
 import torch
 import threading
 import streamlit as st
-from core.segmentation import SegmentationEngine, sam_model_registry
+from paint_core.segmentation import SegmentationEngine, sam_model_registry
 from app_config.constants import PerformanceConfig
 
 # --- CONSTANTS ---
@@ -48,7 +48,7 @@ def get_sam_engine_singleton_v2(checkpoint_path, model_type, salt=""):
     if model is None:
         return None
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    from core.segmentation import SegmentationEngine
+    from paint_core.segmentation import SegmentationEngine
     return SegmentationEngine(model_instance=model, device=device)
 
 def get_sam_engine(checkpoint_path=CHECKPOINT_PATH, model_type=MODEL_TYPE):
@@ -62,7 +62,7 @@ def get_sam_engine(checkpoint_path=CHECKPOINT_PATH, model_type=MODEL_TYPE):
         return None
         
     if "sam_engine" not in st.session_state:
-        from core.segmentation import SegmentationEngine
+        from paint_core.segmentation import SegmentationEngine
         device = "cuda" if torch.cuda.is_available() else "cpu"
         st.session_state["sam_engine"] = SegmentationEngine(model_instance=model, device=device)
         
