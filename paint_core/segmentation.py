@@ -9,6 +9,8 @@ from app_config.constants import SegmentationConfig
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+from .semantic_segmenter import SemanticSegmenter
+
 class SegmentationEngine:
     def __init__(self, checkpoint_path=None, model_type="vit_b", device=None, model_instance=None):
         """
@@ -25,7 +27,7 @@ class SegmentationEngine:
             self.device = device
             
         if model_instance is not None:
-             self.sam = model_instance
+            self.sam = model_instance
         elif checkpoint_path:
              # OPTIMIZATION: Force vit_t if filename suggests MobileSAM
              if "mobile_sam" in checkpoint_path and model_type != "vit_t":
@@ -40,6 +42,14 @@ class SegmentationEngine:
 
         self.predictor = SamPredictor(self.sam)
         self.is_image_set = False
+        
+        # Initialize Semantic Segmenter for Foreground Exclusion
+        try:
+            self.semantic_segmenter = SemanticSegmenter(device=self.device)
+            logger.info("Semantic Segmenter initialized.")
+        except Exception as e:
+            logger.warning(f"Semantic Segmenter failed to initialize: {e}")
+            self.semantic_segmenter = None
 
     def set_image(self, image_rgb):
         """
@@ -57,6 +67,12 @@ class SegmentationEngine:
         logger.info("Computing image embeddings...")
         print(f"DEBUG: SAM Engine {id(self)} - Computing embeddings...")
         self.predictor.set_image(image_rgb)
+        
+        # --- SEMANTIC SEGMENTATION (Async-ish) ---
+        if self.semantic_segmenter:
+            print("DEBUG: Running Semantic Segmentation...")
+            self.semantic_segmenter.process_image(image_rgb)
+            
         self.is_image_set = True
         self.image_rgb = image_rgb
         
@@ -73,7 +89,7 @@ class SegmentationEngine:
         edges = cv2.Laplacian(self.image_blurred, cv2.CV_16S, ksize=3)
         self.image_edges_map = cv2.convertScaleAbs(edges)
         
-        print(f"DEBUG: SAM Engine {id(self)} - is_image_set = True ✅ (Features Pre-computed)")
+        print(f"DEBUG: SAM Engine {id(self)} - is_image_set = True ✅ (Features & Semantics Ready)")
         logger.info("Embeddings and features computed.")
 
     def generate_mask(self, point_coords=None, point_labels=None, box_coords=None, level=None, is_wall_only=False, cleanup=True, is_wall_click=False):
@@ -518,6 +534,23 @@ class SegmentationEngine:
                                     max_label = i
                             best_mask = (labels_im == max_label)
         
+
+        # --- SEMANTIC FOREGROUND EXCLUSION (FINAL PASS) ---
+        if self.semantic_segmenter and is_wall_only:
+             # Get the full exclusion mask (lamps, plants, furniture, etc.)
+             exclusion_mask = self.semantic_segmenter.get_exclusion_mask(best_mask.shape)
+             
+             if np.any(exclusion_mask):
+                 # Refinement: Dilate exclusion mask slightly to cover edge bleeding/fuzzy semantics
+                 # Use a small kernel to avoid eating too much into the wall
+                 kernel_size = 5
+                 kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+                 exclusion_dilated = cv2.dilate(exclusion_mask.astype(np.uint8), kernel).astype(bool)
+                 
+                 # Subtract!
+                 best_mask = best_mask & (~exclusion_dilated)
+                 print("DEBUG: Applied Semantic Foreground Exclusion.")
+
         return best_mask
 
     def _filter_small_components(self, mask, click_x, click_y, target_label, labels_im, stats, centroids):
