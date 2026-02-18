@@ -65,16 +65,17 @@
     };
 
     
-    // 🤏 GLOBAL PINCH HANDLER
+        // 🤏 GLOBAL PINCH HANDLER
     const handlePinch = (e) => {
         if (e.touches.length === 2) {
             window.isCanvasGesturing = true;
-            window.lastPinchDist = Math.hypot(e.touches[1].clientX - e.touches[0].clientX, e.touches[1].clientY - e.touches[0].clientY);
-            window.lastPinchCenter = { x: (e.touches[0].clientX + e.touches[1].clientX) / 2, y: (e.touches[0].clientY + e.touches[1].clientY) / 2 };
+            
             const t1 = e.touches[0];
             const t2 = e.touches[1];
             const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
-            
+            const cx = (t1.clientX + t2.clientX) / 2;
+            const cy = (t1.clientY + t2.clientY) / 2;
+
             if (window.lastPinchDist > 0) {
                 // ZOOM
                 const delta = dist / window.lastPinchDist;
@@ -84,23 +85,20 @@
                 window.userZoomLevel = newZoom;
                 
                 // PAN
-                const cx = (t1.clientX + t2.clientX) / 2;
-                const cy = (t1.clientY + t2.clientY) / 2;
-                
                 if (window.lastPinchCenter) {
                     const dx = cx - window.lastPinchCenter.x;
                     const dy = cy - window.lastPinchCenter.y;
                     window.panX = (window.panX || 0) + dx;
                     window.panY = (window.panY || 0) + dy;
                 }
-                window.lastPinchCenter = { x: cx, y: cy };
-
+                
                 applyResponsiveScale();
             }
-                }
-            }
+            
             window.lastPinchDist = dist;
+            window.lastPinchCenter = { x: cx, y: cy };
             window.lastPinchTime = Date.now();
+            
             e.preventDefault(); 
             e.stopPropagation();
         }
