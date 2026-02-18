@@ -727,8 +727,10 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                 parts = mobile_pan.split(",")
                 if len(parts) >= 2:
                     px, py = float(parts[0]), float(parts[1])
-                    st.session_state["pan_x"], st.session_state["pan_y"] = max(0.0, min(1.0, px)), max(0.0, min(1.0, py))
-                    st.session_state["render_id"] += 1
+                    import math
+                    if not math.isnan(px) and not math.isnan(py):
+                        st.session_state["pan_x"], st.session_state["pan_y"] = max(0.0, min(1.0, px)), max(0.0, min(1.0, py))
+                        st.session_state["render_id"] += 1
                 
                 st.query_params.pop("pan_update", None)
             except: pass
@@ -736,9 +738,10 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
     if mobile_zoom and mobile_zoom.strip() != "":
         try:
             new_zoom = float(mobile_zoom)
-            st.session_state["zoom_level"] = max(1.0, min(4.0, new_zoom))
-            st.session_state["render_id"] += 1
-            
+            import math
+            if not math.isnan(new_zoom):
+                st.session_state["zoom_level"] = max(1.0, min(4.0, new_zoom))
+                st.session_state["render_id"] += 1
             st.query_params.pop("zoom_update", None)
         except: pass
 

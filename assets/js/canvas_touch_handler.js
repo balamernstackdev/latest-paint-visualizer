@@ -813,107 +813,118 @@
     }
     class MultiTouchHandler {
         constructor() {
-            this.lastUpdate = 0;
+            this.reset();
+        }
+
+        reset() {
+            this.isGesturing = false;
             this.initialDist = 0;
             this.initialZoom = 1.0;
             this.initialPan = { x: 0.5, y: 0.5 };
             this.initialMid = { x: 0, y: 0 };
-            this.isGesturing = false;
-
-            this._currentZ = 1.0;
-            this._currentX = 0.5;
-            this._currentY = 0.5;
+            this.currentZ = 1.0;
+            this.currentX = 0.5;
+            this.currentY = 0.5;
+            window.isCanvasGesturing = false;
         }
 
         attach(el) {
             el.addEventListener('touchstart', (e) => {
-                const cfg = window.CANVAS_CONFIG || {};
                 if (e.touches.length === 2) {
                     e.preventDefault();
-                    const t1 = e.touches[0], t2 = e.touches[1];
-                    this.initialDist = Math.hypot(t1.pageX - t2.pageX, t1.pageY - t2.pageY);
-
-                    const rect = el.getBoundingClientRect();
-                    this.initialMid = {
-                        x: (t1.clientX + t2.clientX) / 2 - rect.left,
-                        y: (t1.clientY + t2.clientY) / 2 - rect.top
-                    };
-
-                    this.initialZoom = cfg.ZOOM_LEVEL || 1.0;
-                    this.initialPan = { x: cfg.CUR_PAN_X || 0.5, y: cfg.CUR_PAN_Y || 0.5 };
-
-                    this._currentZ = this.initialZoom;
-                    this._currentX = this.initialPan.x;
-                    this._currentY = this.initialPan.y;
-
+                    const cfg = window.CANVAS_CONFIG || {};
                     this.isGesturing = true;
                     window.isCanvasGesturing = true;
 
+                    const t1 = e.touches[0], t2 = e.touches[1];
+                    this.initialDist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+
+                    // Use screen-relative midpoint for translation tracking
+                    this.initialMid = {
+                        x: (t1.clientX + t2.clientX) / 2,
+                        y: (t1.clientY + t2.clientY) / 2
+                    };
+
+                    this.initialZoom = parseFloat(cfg.ZOOM_LEVEL) || 1.0;
+                    this.initialPan = {
+                        x: parseFloat(cfg.CUR_PAN_X) || 0.5,
+                        y: parseFloat(cfg.CUR_PAN_Y) || 0.5
+                    };
+
+                    this.currentZ = this.initialZoom;
+                    this.currentX = this.initialPan.x;
+                    this.currentY = this.initialPan.y;
+
                     const iframe = getActiveIframe();
-                    if (iframe) iframe.style.transition = 'none';
+                    if (iframe) {
+                        iframe.style.transition = 'none';
+                        iframe.style.transformOrigin = 'center center'; // Stable origin
+                    }
                 }
             }, { passive: false });
 
             el.addEventListener('touchmove', (e) => {
                 if (this.isGesturing && e.touches.length === 2) {
                     e.preventDefault();
-                    const cfg = window.CANVAS_CONFIG || {};
                     const t1 = e.touches[0], t2 = e.touches[1];
-                    const dist = Math.hypot(t1.pageX - t2.pageX, t1.pageY - t2.pageY);
-
-                    const rect = el.getBoundingClientRect();
+                    const dist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
                     const mid = {
-                        x: (t1.clientX + t2.clientX) / 2 - rect.left,
-                        y: (t1.clientY + t2.clientY) / 2 - rect.top
+                        x: (t1.clientX + t2.clientX) / 2,
+                        y: (t1.clientY + t2.clientY) / 2
                     };
 
-                    const gestureScale = dist / this.initialDist;
+                    // Scale Calculation
+                    const gestureScale = this.initialDist > 5 ? dist / this.initialDist : 1.0;
                     const newZoom = Math.max(1.0, Math.min(4.0, this.initialZoom * gestureScale));
 
-                    // Pan calculation should be relative to screen pixels
-                    const dx_px = mid.x - this.initialMid.x;
-                    const dy_px = mid.y - this.initialMid.y;
+                    // Pan Calculation
+                    const dx = mid.x - this.initialMid.x;
+                    const dy = mid.y - this.initialMid.y;
 
-                    // Normalized movement: how much of the VISUAL container did we move?
-                    const normDx = dx_px / rect.width;
-                    const normDy = dy_px / rect.height;
+                    const rect = el.getBoundingClientRect();
+                    // Normalization relative to container size
+                    const normDx = dx / Math.max(rect.width, 100);
+                    const normDy = dy / Math.max(rect.height, 100);
 
-                    // Apply to pan center (sensitive to current zoom)
+                    // Panning sensitivity decreases as we zoom in (more precise)
                     const panSens = 1.0 / this.initialZoom;
                     const newPanX = Math.max(0, Math.min(1, this.initialPan.x - normDx * panSens));
                     const newPanY = Math.max(0, Math.min(1, this.initialPan.y - normDy * panSens));
 
-                    this._currentZ = newZoom;
-                    this._currentX = newPanX;
-                    this._currentY = newPanY;
+                    // Guard against NaN
+                    if (!isNaN(newZoom)) this.currentZ = newZoom;
+                    if (!isNaN(newPanX)) this.currentX = newPanX;
+                    if (!isNaN(newPanY)) this.currentY = newPanY;
 
                     // --- CSS PREVIEW ---
                     const iframe = getActiveIframe();
                     if (iframe) {
                         const baseScale = Math.min(1.0, (parent.window.innerWidth - 20) / CANVAS_WIDTH);
-
-                        // Set origin to the start-midpoint of the pinch for natural feel
-                        iframe.style.transformOrigin = `${this.initialMid.x / baseScale}px ${this.initialMid.y / baseScale}px`;
-
-                        // Combine base scale with new pinch scale
                         const visualScale = baseScale * gestureScale;
-
-                        // translate(...) moves the image with the midpoint shift
-                        iframe.style.transform = `translate(${dx_px}px, ${dy_px}px) scale(${visualScale})`;
+                        // Use simple translate for immediate finger-follow
+                        iframe.style.transform = `translate(${dx}px, ${dy}px) scale(${visualScale})`;
                     }
                 }
             }, { passive: false });
 
-            el.addEventListener('touchend', (e) => {
+            const endFunc = (e) => {
                 if (this.isGesturing) {
-                    this.isGesturing = false;
-                    window.isCanvasGesturing = false;
+                    const finalZ = this.currentZ;
+                    const finalX = this.currentX;
+                    const finalY = this.currentY;
+
+                    this.reset();
                     window.lastPinchTime = Date.now();
 
-                    // Final commit to backend
-                    this.sync(this._currentZ, this._currentX, this._currentY);
+                    // Ensure we don't send garbage
+                    if (!isNaN(finalZ) && !isNaN(finalX) && !isNaN(finalY)) {
+                        this.sync(finalZ, finalX, finalY);
+                    }
                 }
-            });
+            };
+
+            el.addEventListener('touchend', endFunc);
+            el.addEventListener('touchcancel', endFunc);
         }
 
         sync(z, px, py) {
