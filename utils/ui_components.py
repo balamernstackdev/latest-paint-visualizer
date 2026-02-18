@@ -224,16 +224,7 @@ def setup_styles():
             --font: "Segoe UI", sans-serif;
         }}
         
-        /* 📱 MOBILE PINCH-ZOOM LOCKDOWN */
-        html, body, .stApp {{
-            touch-action: manipulation !important; /* Disables double-tap to zoom, but allows scroll */
-        }}
 
-        iframe[title="streamlit_drawable_canvas.st_canvas"], 
-        .element-container iframe,
-        [id$="-overlay"] {{
-            touch-action: none !important; /* Complete control for our JS handlers */
-        }}
         
         [data-testid="stSidebar"] {{
             background-color: #f8f9fa !important; 
@@ -429,23 +420,11 @@ def setup_styles():
     
     st.markdown(full_css, unsafe_allow_html=True)
 
-    # --- SILENCE CONSOLE WARNINGS & LOCK VIEWPORT ---
+    # --- SILENCE CONSOLE WARNINGS (Main Window Injection) ---
+    # This script intercepts browser console warnings originating from Streamlit or dependencies
     st.markdown("""
         <script>
         (function() {
-            // 🔒 LOCK VIEWPORT (Prevent Page Zoom)
-            const meta = window.parent.document.createElement('meta');
-            meta.name = 'viewport';
-            meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover';
-            
-            // Check if meta exists, replace if so, else append
-            const existing = window.parent.document.querySelector('meta[name="viewport"]');
-            if (existing) {
-                existing.content = meta.content;
-            } else {
-                window.parent.document.getElementsByTagName('head')[0].appendChild(meta);
-            }
-
             const _backupWarn = console.warn;
             const _backupError = console.error;
             
@@ -511,36 +490,25 @@ def sidebar_paint_fragment():
 
 
 def render_zoom_controls(key_suffix="", context_class=""):
-    """Render manual zoom and pan controls with reset."""
+    """Render zoom and pan controls.
+    Args:
+        key_suffix: Unique suffix for widget keys to prevent duplicates.
+        context_class: CSS class to wrap the controls (e.g. 'mobile-zoom-wrapper') for responsive hiding.
+    """
+    # Wrap in a container that we can target with CSS if possible, or just apply classes to elements
     if context_class:
         st.markdown(f'<div class="{context_class}">', unsafe_allow_html=True)
 
-    z_col1, z_col2, z_col3 = st.columns([1, 2, 1])
-    
-    def update_zoom(delta):
-        st.session_state["zoom_level"] = max(1.0, min(4.0, st.session_state.get("zoom_level", 1.0) + delta))
-        st.session_state["render_id"] += 1
-        st.session_state["canvas_id"] = st.session_state.get("canvas_id", 0) + 1
-
-    with z_col1:
-        if st.button("➖", key=f"z_out_{key_suffix}", use_container_width=True):
-            update_zoom(-0.2); safe_rerun()
-            
-    with z_col2:
-        zoom_pct = int(st.session_state.get("zoom_level", 1.0) * 100)
-        label = f"Zoom: {zoom_pct}%"
-        if st.button(f"🎯 Reset ({zoom_pct}%)", key=f"z_reset_{key_suffix}", use_container_width=True):
+    # Simplified Zoom: Removed manual +/- buttons, pinch to zoom is preferred.
+    if st.session_state.get("zoom_level", 1.0) > 1.0 or st.session_state.get("pan_x", 0.5) != 0.5 or st.session_state.get("pan_y", 0.5) != 0.5:
+        if st.button("🎯 Reset View", use_container_width=True, key=f"reset_view_{key_suffix}"):
             st.session_state["zoom_level"] = 1.0
             st.session_state["pan_x"] = 0.5
             st.session_state["pan_y"] = 0.5
             st.session_state["render_id"] += 1
             st.session_state["canvas_id"] = st.session_state.get("canvas_id", 0) + 1
-            safe_rerun()
+            st.rerun()
             
-    with z_col3:
-        if st.button("➕", key=f"z_in_{key_suffix}", use_container_width=True):
-            update_zoom(0.2); safe_rerun()
-
     if context_class:
         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -738,10 +706,8 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                 parts = mobile_pan.split(",")
                 if len(parts) >= 2:
                     px, py = float(parts[0]), float(parts[1])
-                    import math
-                    if not math.isnan(px) and not math.isnan(py):
-                        st.session_state["pan_x"], st.session_state["pan_y"] = max(0.0, min(1.0, px)), max(0.0, min(1.0, py))
-                        st.session_state["render_id"] += 1
+                    st.session_state["pan_x"], st.session_state["pan_y"] = max(0.0, min(1.0, px)), max(0.0, min(1.0, py))
+                    st.session_state["render_id"] += 1
                 
                 st.query_params.pop("pan_update", None)
             except: pass
@@ -749,10 +715,9 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
     if mobile_zoom and mobile_zoom.strip() != "":
         try:
             new_zoom = float(mobile_zoom)
-            import math
-            if not math.isnan(new_zoom):
-                st.session_state["zoom_level"] = max(1.0, min(4.0, new_zoom))
-                st.session_state["render_id"] += 1
+            st.session_state["zoom_level"] = max(1.0, min(4.0, new_zoom))
+            st.session_state["render_id"] += 1
+            
             st.query_params.pop("zoom_update", None)
         except: pass
 
