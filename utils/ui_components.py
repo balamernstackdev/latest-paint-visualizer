@@ -1225,6 +1225,7 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
     render_zoom_controls(key_suffix="frag", context_class="mobile-zoom-wrapper")
     
     # 6. UNDO/REDO (Inside Fragment)
+
     if st.session_state["masks"] or st.session_state.get("masks_redo"):
         st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
         btn_col1, btn_col2, btn_col3 = st.columns([1, 1, 1])
@@ -1283,6 +1284,9 @@ def render_visualizer_engine_v11(display_width):
     elif "Polygonal" in tool_mode: drawing_mode = "polygon"
     elif "Magic Wand" in tool_mode: drawing_mode = "point"
     else: drawing_mode = "transform"
+    
+    # Calculate height based on image aspect ratio and chosen display width
+    display_height = int(h * (display_width / w))
     
     render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_w, view_h, scale_factor, h, w, drawing_mode)
 

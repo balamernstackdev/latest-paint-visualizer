@@ -496,22 +496,36 @@
             const iframes = parent.document.getElementsByTagName('iframe');
             if (!iframes.length) return;
 
-            const winW = parent.window.innerWidth;
-            const targetWidth = winW < 1024 ? winW - 10 : winW - 40;
-            if (targetWidth <= 0 || !CANVAS_WIDTH) return;
+            // 📱 MOBLE DETECTION FIX: Use visualViewport for Safari/Chrome on iOS
+            let winW = parent.window.innerWidth || parent.document.documentElement.clientWidth;
+            if (parent.window.visualViewport) {
+                winW = parent.window.visualViewport.width;
+            }
 
-            const scale = Math.min(1.0, targetWidth / CANVAS_WIDTH);
+            const targetWidth = winW < 1024 ? winW - 4 : winW - 40;
+            if (targetWidth <= 50 || !CANVAS_WIDTH) return; // 🛡️ Safety: Don't scale if width is tiny (race condition)
+
+            let scale = targetWidth / CANVAS_WIDTH;
+
+            // 🛡️ CRITICAL SAFETY FLOOR: Never shrink image below 10% of screen
+            // This prevents the "tiny image" bug shown in the screenshot.
+            if (scale < 0.1) scale = 0.1;
+            if (scale > 1.0) scale = 1.0;
 
             for (let iframe of iframes) {
                 if (iframe.title === "streamlit_drawable_canvas.st_canvas" || iframe.src.includes('streamlit_drawable_canvas')) {
                     const wrapper = iframe.parentElement;
+                    if (!wrapper) continue;
+
+                    // 🏗️ CLEAN LAYOUT: Force the wrapper to stay top-centered and correctly sized
                     wrapper.style.cssText = `
-                        width: ${CANVAS_WIDTH * scale}px;
-                        height: ${CANVAS_HEIGHT * scale}px;
+                        width: ${Math.floor(CANVAS_WIDTH * scale)}px;
+                        height: ${Math.floor(CANVAS_HEIGHT * scale)}px;
                         position: relative;
-                        overflow: hidden;
-                        margin: 0 auto;
+                        margin: 0 auto !important;
+                        display: block !important;
                         touch-action: none;
+                        overflow: visible;
                     `;
 
                     iframe.style.cssText = `
@@ -522,6 +536,8 @@
                         position: absolute;
                         top: 0; left: 0;
                         touch-action: none;
+                        opacity: 1;
+                        transition: opacity 0.2s;
                     `;
                 }
             }

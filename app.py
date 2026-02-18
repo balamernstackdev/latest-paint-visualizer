@@ -552,7 +552,6 @@ def main():
         render_visualizer_engine_v11(800)
     else:
         # Landing Page (Safe & Visible)
-        st.markdown("<div style='height: 5vh'></div>", unsafe_allow_html=True)
         st.markdown("""
             <div style="text-align: center; max-width: 800px; margin: 0 auto; padding: 20px;">
                 <h1 style="font-size: 2.5rem; font-weight: 800; color: #111827; margin-bottom: 20px;">
