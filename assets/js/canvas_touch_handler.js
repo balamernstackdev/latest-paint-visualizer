@@ -392,7 +392,7 @@
             this.toolbar.style.display = this.boxes.length > 0 ? 'flex' : 'none';
         }
 
-        onPointerDown(e) {
+                onPointerDown(e) {
             // 🛡️ STRICT GESTURE GUARD
             const touchCount = e.pointerType === 'touch' ? window.activePointers.size : 0;
             if (window.isCanvasGesturing || touchCount > 1 || (Date.now() - window.lastPinchTime < 600)) {
@@ -400,22 +400,23 @@
                 return;
             }
 
-            // DO NOT preventDefault here to allow scroll detection
             this.overlay.setPointerCapture(e.pointerId);
 
             const rect = this.overlay.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
+            // 🔍 COORDINATE MAPPING (Visual -> Intrinsic)
+            // rect.width is the ZOOMED visual width. CANVAS_WIDTH is validation.
+            const scale = rect.width / CANVAS_WIDTH;
+            const x = (e.clientX - rect.left) / scale;
+            const y = (e.clientY - rect.top) / scale;
 
             // 1. Check Active Handles
             if (e.target.dataset.handle) {
                 this.isMoving = false;
                 this.isDrawing = false;
                 this.activeHandle = e.target.dataset.handle;
-                // Clone current box state for start reference
                 this.startBox = { ...this.boxes[this.selectedIndex] };
-                this.startX = e.clientX;
-                this.startY = e.clientY;
+                this.startX = x; // Store intrinsic start
+                this.startY = y;
                 return;
             }
 
@@ -427,8 +428,8 @@
                     this.isMoving = true;
                     this.isDrawing = false;
                     this.activeHandle = null;
-                    this.startX = e.clientX;
-                    this.startY = e.clientY;
+                    this.startX = x;
+                    this.startY = y;
                     this.startBox = { ...b };
                     this.updateDOM();
                     return;
@@ -444,12 +445,11 @@
             const newBox = { x, y, w: 0, h: 0 };
             this.boxes.push(newBox);
             this.selectedIndex = this.boxes.length - 1;
-            // For new box, startBox just tracks origin
             this.startBox = { ...newBox };
             this.updateDOM();
         }
 
-        onPointerMove(e) {
+                onPointerMove(e) {
             const touchCount = e.pointerType === 'touch' ? window.activePointers.size : 0;
             if (window.isCanvasGesturing || touchCount > 1) {
                 this.cancelDrawing();
@@ -459,8 +459,10 @@
             e.preventDefault();
 
             const rect = this.overlay.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
+            // 🔍 COORDINATE MAPPING
+            const scale = rect.width / CANVAS_WIDTH;
+            const x = (e.clientX - rect.left) / scale;
+            const y = (e.clientY - rect.top) / scale;
 
             if (this.isDrawing) {
                 const b = this.boxes[this.selectedIndex];
@@ -468,33 +470,29 @@
                 const minY = Math.min(this.startY, y);
                 const w = Math.abs(x - this.startX);
                 const h = Math.abs(y - this.startY);
-                // Clamp to canvas
+                // Clamp
                 b.x = Math.max(0, minX);
                 b.y = Math.max(0, minY);
-                b.w = Math.min(w, rect.width - b.x);
-                b.h = Math.min(h, rect.height - b.y);
+                b.w = Math.min(w, CANVAS_WIDTH - b.x); // Clamp to Intrinsic Size
+                b.h = Math.min(h, CANVAS_HEIGHT - b.y);
             }
             else if (this.isMoving) {
-                const dx = e.clientX - this.startX;
-                const dy = e.clientY - this.startY;
+                const dx = x - this.startX;
+                const dy = y - this.startY;
                 const b = this.boxes[this.selectedIndex];
                 const sb = this.startBox;
-
                 let nx = sb.x + dx;
                 let ny = sb.y + dy;
-
                 // Clamp
-                nx = Math.max(0, Math.min(nx, rect.width - sb.w));
-                ny = Math.max(0, Math.min(ny, rect.height - sb.h));
-
+                nx = Math.max(0, Math.min(nx, CANVAS_WIDTH - sb.w));
+                ny = Math.max(0, Math.min(ny, CANVAS_HEIGHT - sb.h));
                 b.x = nx; b.y = ny;
             }
             else if (this.activeHandle) {
-                const dx = e.clientX - this.startX;
-                const dy = e.clientY - this.startY;
+                const dx = x - this.startX;
+                const dy = y - this.startY;
                 const b = this.boxes[this.selectedIndex];
                 const sb = this.startBox;
-
                 let nx = sb.x, ny = sb.y, nw = sb.w, nh = sb.h;
 
                 if (this.activeHandle.includes('e')) nw = sb.w + dx;
@@ -502,19 +500,11 @@
                 if (this.activeHandle.includes('w')) { nw = sb.w - dx; nx = sb.x + dx; }
                 if (this.activeHandle.includes('n')) { nh = sb.h - dy; ny = sb.y + dy; }
 
-                // Min size check
-                if (nw < 20) {
-                    if (this.activeHandle.includes('w')) nx = sb.x + sb.w - 20;
-                    nw = 20;
-                }
-                if (nh < 20) {
-                    if (this.activeHandle.includes('n')) ny = sb.y + sb.h - 20;
-                    nh = 20;
-                }
+                if (nw < 20) { if (this.activeHandle.includes('w')) nx = sb.x + sb.w - 20; nw = 20; }
+                if (nh < 20) { if (this.activeHandle.includes('n')) ny = sb.y + sb.h - 20; nh = 20; }
 
                 b.x = nx; b.y = ny; b.w = nw; b.h = nh;
             }
-
             requestAnimationFrame(() => this.updateDOM());
         }
 
@@ -546,15 +536,14 @@
             this.updateDOM();
         }
 
-        commit() {
+                commit() {
             if (this.boxes.length === 0) return;
-            const rect = this.overlay.getBoundingClientRect();
-            const scale = CANVAS_WIDTH / rect.width;
+            // Coords are already intrinsic. No scale needed (or scale=1).
             const parts = this.boxes.map(b => {
-                const cx1 = Math.round(b.x * scale);
-                const cy1 = Math.round(b.y * scale);
-                const cx2 = Math.round((b.x + b.w) * scale);
-                const cy2 = Math.round((b.y + b.h) * scale);
+                const cx1 = Math.round(b.x);
+                const cy1 = Math.round(b.y);
+                const cx2 = Math.round(b.x + b.w);
+                const cy2 = Math.round(b.y + b.h);
                 return `${cx1},${cy1},${cx2},${cy2}`;
             });
             const val = parts.join('|') + ',' + Date.now();
@@ -562,17 +551,14 @@
             url.searchParams.set('box', val);
             url.searchParams.delete('tap'); url.searchParams.delete('poly_pts');
             throttledReplaceState(url);
-
-            // Clear INSTANTLY to give feedback
             this.boxes = [];
             this.selectedIndex = -1;
             this.updateDOM();
-
             setTimeout(() => triggerRerun(), 500);
         }
     }
 
-                function applyResponsiveScale() {
+                    function applyResponsiveScale() {
         if (window.isCanvasGesturing) return; 
         try {
             const iframes = parent.document.getElementsByTagName('iframe');
@@ -586,7 +572,7 @@
             const targetWidth = winW < 1024 ? winW - 4 : winW - 40;
             if (targetWidth <= 50 || !CANVAS_WIDTH) return;
 
-            // BASE Scale (Fit to Logic)
+            // BASE Scale
             let baseScale = targetWidth / CANVAS_WIDTH;
             if (baseScale < 0.1) baseScale = 0.1;
             
@@ -609,19 +595,14 @@
                         position: relative;
                         margin: 0 auto !important;
                         display: block !important;
-                        overflow: hidden; /* ✂️ Clip zoomed content */
+                        overflow: hidden; 
                         touch-action: none;
                         user-select: none;
                         -webkit-user-select: none;
                     `;
 
-                    // Iframe: Centered & Scaled
-                    // transform-origin: center center ensures zoom grows from middle
-                    // translate(-50%, -50%) centers it initially
-                    // translate(px, py) applies user pan
-                    // scale(totalScale) checks zoom
-                    
-                    iframe.style.cssText = `
+                    // Shared Transform Style for Iframe AND Overlay
+                    const transformStyle = `
                         width: ${CANVAS_WIDTH}px;
                         height: ${CANVAS_HEIGHT}px;
                         position: absolute;
@@ -634,6 +615,23 @@
                         opacity: 1;
                         border: none;
                     `;
+
+                    iframe.style.cssText = transformStyle;
+
+                    // 🛠️ APPLY TO OVERLAY TOO
+                    const overlay = wrapper.querySelector('[id$="-overlay"]');
+                    if (overlay) {
+                         // Keep base overlay styles but override transform/size
+                         overlay.style.cssText = `
+                             ${transformStyle}
+                             display: block; 
+                             z-index: 999;
+                             cursor: crosshair;
+                             overflow: visible;
+                         `;
+                         // Ensure overlay has correct ID style for touch
+                         overlay.style.touchAction = 'none';
+                    }
                 }
             }
         } catch (e) { }
@@ -694,32 +692,29 @@
             }
         }
 
-        onPointerDown(e) {
-            // 🛡️ STRICT GESTURE GUARD
+                        onPointerDown(e) {
             const touchCount = e.pointerType === 'touch' ? window.activePointers.size : 0;
             if (window.isCanvasGesturing || touchCount > 1 || (Date.now() - (window.lastPinchTime || 0) < 600)) return;
-
-            // e.preventDefault(); // Removed to allow scroll
             e.stopPropagation();
 
             if (this.isClosed) return;
 
             const rect = this.overlay.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
+            // 🔍 COORDINATE MAPPING
+            const scale = rect.width / CANVAS_WIDTH;
+            const x = (e.clientX - rect.left) / scale;
+            const y = (e.clientY - rect.top) / scale;
 
             if (this.mode === 'freedraw') {
-                // Freehand: Start new shape on down
                 this.points = [{ x, y }];
                 this.isDrawing = true;
                 this.render();
             } else {
-                // Polygon: Add point
                 if (this.points.length > 2) {
                     const start = this.points[0];
                     const dx = x - start.x;
                     const dy = y - start.y;
-                    if (Math.sqrt(dx * dx + dy * dy) < 20) {
+                    if (Math.sqrt(dx * dx + dy * dy) < 20) { // 20px intrinsic tolerance
                         this.closePolygon();
                         return;
                     }
@@ -729,17 +724,17 @@
             }
         }
 
-        onPointerMove(e) {
+                        onPointerMove(e) {
             if (this.mode === 'freedraw' && this.isDrawing) {
                 const rect = this.overlay.getBoundingClientRect();
-                const x = e.clientX - rect.left;
-                const y = e.clientY - rect.top;
+                const scale = rect.width / CANVAS_WIDTH;
+                const x = (e.clientX - rect.left) / scale;
+                const y = (e.clientY - rect.top) / scale;
 
-                // Standard Throttle (5px) - restoration
                 const last = this.points[this.points.length - 1];
                 const dx = x - last.x;
                 const dy = y - last.y;
-                if (dx * dx + dy * dy > 25) {
+                if (dx * dx + dy * dy > 5) { // 5px tolerance implicit
                     this.points.push({ x, y });
                     this.render();
                 }
@@ -824,34 +819,23 @@
             }
         }
 
-        commit() {
+                        commit() {
             if (!this.isClosed || this.points.length < 3) return;
-
-            const rect = this.overlay.getBoundingClientRect();
-            const scale = CANVAS_WIDTH / rect.width;
-
-            // Format: x1,y1;x2,y2;...
+            // Coords are already intrinsic.
             const ptsStr = this.points.map(p => {
-                const cx = Math.round(p.x * scale);
-                const cy = Math.round(p.y * scale);
-                return `${cx},${cy}`;
+                return `${Math.round(p.x)},${Math.round(p.y)}`;
             }).join(';');
-
+            
             const val = ptsStr + ',' + Date.now();
-            console.log("JS: Commit Poly:", val);
-
             const url = new URL(parent.location.href);
             url.searchParams.set('poly_pts', val);
-            url.searchParams.delete('box');
-            url.searchParams.delete('tap');
+            url.searchParams.delete('tap'); url.searchParams.delete('box');
             throttledReplaceState(url);
 
-            setTimeout(() => triggerRerun(), 500);
-
-            // Reset
             this.points = [];
             this.isClosed = false;
             this.render();
+            setTimeout(() => triggerRerun(), 500);
         }
     }
 
@@ -880,22 +864,61 @@
             }
         }
 
-        onPointerDown(e) {
+                onPointerDown(e) {
             // 🛡️ STRICT GESTURE GUARD
             const touchCount = e.pointerType === 'touch' ? window.activePointers.size : 0;
-            if (window.isCanvasGesturing || touchCount > 1 || (Date.now() - (window.lastPinchTime || 0) < 600)) {
-                this.potentialX = null;
+            if (window.isCanvasGesturing || touchCount > 1 || (Date.now() - window.lastPinchTime < 600)) {
+                this.cancelDrawing();
                 return;
             }
 
-            // e.preventDefault(); // Removed to allow scroll
-            e.stopPropagation();
+            this.overlay.setPointerCapture(e.pointerId);
 
             const rect = this.overlay.getBoundingClientRect();
-            // Store potential tap position
-            this.potentialX = e.clientX;
-            this.potentialY = e.clientY;
-            this.potentialTime = Date.now();
+            // 🔍 COORDINATE MAPPING (Visual -> Intrinsic)
+            // rect.width is the ZOOMED visual width. CANVAS_WIDTH is validation.
+            const scale = rect.width / CANVAS_WIDTH;
+            const x = (e.clientX - rect.left) / scale;
+            const y = (e.clientY - rect.top) / scale;
+
+            // 1. Check Active Handles
+            if (e.target.dataset.handle) {
+                this.isMoving = false;
+                this.isDrawing = false;
+                this.activeHandle = e.target.dataset.handle;
+                this.startBox = { ...this.boxes[this.selectedIndex] };
+                this.startX = x; // Store intrinsic start
+                this.startY = y;
+                return;
+            }
+
+            // 2. Check Box Click (Move)
+            for (let i = this.boxes.length - 1; i >= 0; i--) {
+                const b = this.boxes[i];
+                if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) {
+                    this.selectedIndex = i;
+                    this.isMoving = true;
+                    this.isDrawing = false;
+                    this.activeHandle = null;
+                    this.startX = x;
+                    this.startY = y;
+                    this.startBox = { ...b };
+                    this.updateDOM();
+                    return;
+                }
+            }
+
+            // 3. New Box
+            this.isDrawing = true;
+            this.isMoving = false;
+            this.activeHandle = null;
+            this.startX = x;
+            this.startY = y;
+            const newBox = { x, y, w: 0, h: 0 };
+            this.boxes.push(newBox);
+            this.selectedIndex = this.boxes.length - 1;
+            this.startBox = { ...newBox };
+            this.updateDOM();
         }
 
         onPointerUp(e) {
