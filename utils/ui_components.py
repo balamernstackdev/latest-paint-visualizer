@@ -511,25 +511,36 @@ def sidebar_paint_fragment():
 
 
 def render_zoom_controls(key_suffix="", context_class=""):
-    """Render zoom and pan controls.
-    Args:
-        key_suffix: Unique suffix for widget keys to prevent duplicates.
-        context_class: CSS class to wrap the controls (e.g. 'mobile-zoom-wrapper') for responsive hiding.
-    """
-    # Wrap in a container that we can target with CSS if possible, or just apply classes to elements
+    """Render manual zoom and pan controls with reset."""
     if context_class:
         st.markdown(f'<div class="{context_class}">', unsafe_allow_html=True)
 
-    # Simplified Zoom: Removed manual +/- buttons, pinch to zoom is preferred.
-    if st.session_state.get("zoom_level", 1.0) > 1.0 or st.session_state.get("pan_x", 0.5) != 0.5 or st.session_state.get("pan_y", 0.5) != 0.5:
-        if st.button("🎯 Reset View", use_container_width=True, key=f"reset_view_{key_suffix}"):
+    z_col1, z_col2, z_col3 = st.columns([1, 2, 1])
+    
+    def update_zoom(delta):
+        st.session_state["zoom_level"] = max(1.0, min(4.0, st.session_state.get("zoom_level", 1.0) + delta))
+        st.session_state["render_id"] += 1
+        st.session_state["canvas_id"] = st.session_state.get("canvas_id", 0) + 1
+
+    with z_col1:
+        if st.button("➖", key=f"z_out_{key_suffix}", use_container_width=True):
+            update_zoom(-0.2); safe_rerun()
+            
+    with z_col2:
+        zoom_pct = int(st.session_state.get("zoom_level", 1.0) * 100)
+        label = f"Zoom: {zoom_pct}%"
+        if st.button(f"🎯 Reset ({zoom_pct}%)", key=f"z_reset_{key_suffix}", use_container_width=True):
             st.session_state["zoom_level"] = 1.0
             st.session_state["pan_x"] = 0.5
             st.session_state["pan_y"] = 0.5
             st.session_state["render_id"] += 1
             st.session_state["canvas_id"] = st.session_state.get("canvas_id", 0) + 1
-            st.rerun()
+            safe_rerun()
             
+    with z_col3:
+        if st.button("➕", key=f"z_in_{key_suffix}", use_container_width=True):
+            update_zoom(0.2); safe_rerun()
+
     if context_class:
         st.markdown('</div>', unsafe_allow_html=True)
 
