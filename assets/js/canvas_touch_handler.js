@@ -560,57 +560,45 @@
         }
     }
 
-    function applyResponsiveScale() {
-        if (window.isCanvasGesturing) return; // 🛑 DON'T FIGHT WITH GESTURE PREVIEW
-        const now = Date.now();
-        if (now - (window.lastPinchTime || 0) < 1000) return; // Delay snap-back
-
+        function applyResponsiveScale() {
+        if (window.isCanvasGesturing) return; 
         try {
             const iframes = parent.document.getElementsByTagName('iframe');
             if (!iframes.length) return;
 
-            // 📱 MOBLE DETECTION FIX: Use visualViewport for Safari/Chrome on iOS
             let winW = parent.window.innerWidth || parent.document.documentElement.clientWidth;
             if (parent.window.visualViewport) {
                 winW = parent.window.visualViewport.width;
             }
 
             const targetWidth = winW < 1024 ? winW - 4 : winW - 40;
-            if (targetWidth <= 50 || !CANVAS_WIDTH) return; // 🛡️ Safety: Don't scale if width is tiny (race condition)
+            if (targetWidth <= 50 || !CANVAS_WIDTH) return;
 
-            let scale = (targetWidth / CANVAS_WIDTH) * (window.userZoomLevel || 1.0);
-
-            // 🛡️ CRITICAL SAFETY FLOOR: Never shrink image below 10% of screen
-            // This prevents the "tiny image" bug shown in the screenshot.
+            let scale = targetWidth / CANVAS_WIDTH;
             if (scale < 0.1) scale = 0.1;
-            // if (scale > 1.0) scale = 1.0; // ALLOW ZOOM > 1.0
 
             for (let iframe of iframes) {
                 if (iframe.title === "streamlit_drawable_canvas.st_canvas" || iframe.src.includes('streamlit_drawable_canvas')) {
                     const wrapper = iframe.parentElement;
                     if (!wrapper) continue;
 
-                    // 🏗️ CLEAN LAYOUT: Force the wrapper to stay top-centered and correctly sized
                     wrapper.style.cssText = `
                         width: ${Math.floor(CANVAS_WIDTH * scale)}px;
                         height: ${Math.floor(CANVAS_HEIGHT * scale)}px;
                         position: relative;
                         margin: 0 auto !important;
                         display: block !important;
-                        touch-action: none;
                         overflow: visible;
                     `;
 
                     iframe.style.cssText = `
                         width: ${CANVAS_WIDTH}px;
                         height: ${CANVAS_HEIGHT}px;
-                        transform: translate(${window.panX || 0}px, ${window.panY || 0}px) scale(${scale});
+                        transform: scale(${scale});
                         transform-origin: top left;
                         position: absolute;
                         top: 0; left: 0;
-                        touch-action: none;
                         opacity: 1;
-                        transition: opacity 0.2s;
                     `;
                 }
             }
