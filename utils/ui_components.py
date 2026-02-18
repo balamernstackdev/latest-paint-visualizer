@@ -225,6 +225,17 @@ def setup_styles():
         }}
         
 
+        /* 📱 MOBILE PINCH-ZOOM LOCKDOWN */
+        html, body, .stApp {{
+            touch-action: manipulation !important;
+            overscroll-behavior-y: none;
+        }}
+
+        iframe[title="streamlit_drawable_canvas.st_canvas"], 
+        .element-container iframe,
+        [id$="-overlay"] {{
+            touch-action: none !important;
+        }}
         
         [data-testid="stSidebar"] {{
             background-color: #f8f9fa !important; 
@@ -233,7 +244,7 @@ def setup_styles():
         }}
 
         @media (min-width: 769px) {{
-            .m-open-container, .mobile-only {{ display: none !important; }}
+            .m-open-container, .desktop-only {{ display: none !important; }}
         }}
 
         /* 🔓 GLOBAL TOGGLE PERSISTENCE (Clean Icon-Only) */
@@ -451,18 +462,13 @@ def setup_styles():
             const _backupWarn = console.warn;
             const _backupError = console.error;
             
-            const filterPattern = /Unrecognized feature|ambient-light-sensor|battery|document-domain|layout-animations|legacy-image-formats|oversized-images|vr|wake-lock|allow-scripts|allow-same-origin|escape its sandboxing|Invalid color|theme\\.sidebar|widgetBackground/i;
-            
-            console.warn = function(...args) {
-                const msg = (args[0] || '').toString();
-                if (filterPattern.test(msg)) return;
-                _backupWarn.apply(console, args);
+            console.warn = function() {
+                if (arguments[0] && typeof arguments[0] === 'string' && arguments[0].includes('Streamlit')) return;
+                _backupWarn.apply(console, arguments);
             };
-            
-            console.error = function(...args) {
-                const msg = (args[0] || '').toString();
-                if (filterPattern.test(msg)) return;
-                _backupError.apply(console, args);
+            console.error = function() {
+                if (arguments[0] && typeof arguments[0] === 'string' && arguments[0].includes('Streamlit')) return;
+                _backupError.apply(console, arguments);
             };
 
             // 📱 SIDEBAR BUTTON PERMANENCE (No-Hover Fix)

@@ -834,9 +834,10 @@
         }
 
         attach(el) {
+            // Passive: false is crucial for preventDefault to stop browser zoom
             el.addEventListener('touchstart', (e) => {
                 if (e.touches.length === 2) {
-                    e.preventDefault(); // 🛑 STOP BROWSER PAGE ZOOM
+                    e.preventDefault();
                     this.isGesturing = true;
                     window.isCanvasGesturing = true;
 
@@ -845,8 +846,11 @@
                     this.initialMid = { x: (t1.pageX + t2.pageX) / 2, y: (t1.pageY + t2.pageY) / 2 };
 
                     const config = window.CANVAS_CONFIG || {};
-                    this.initialZoom = config.ZOOM_LEVEL || 1.0;
-                    this.initialPan = { x: config.CUR_PAN_X || 0.5, y: config.CUR_PAN_Y || 0.5 };
+                    this.initialZoom = parseFloat(config.ZOOM_LEVEL) || 1.0;
+                    this.initialPan = {
+                        x: parseFloat(config.CUR_PAN_X) || 0.5,
+                        y: parseFloat(config.CUR_PAN_Y) || 0.5
+                    };
 
                     const iframe = getActiveIframe();
                     if (iframe) {
@@ -855,51 +859,77 @@
                         const ox = ((this.initialMid.x - rect.left) / rect.width) * 100;
                         const oy = ((this.initialMid.y - rect.top) / rect.height) * 100;
                         iframe.style.transformOrigin = `${ox}% ${oy}%`;
+                        iframe.style.opacity = '0.9';
                     }
                 }
             }, { passive: false });
 
             el.addEventListener('touchmove', (e) => {
                 if (this.isGesturing && e.touches.length === 2) {
-                    e.preventDefault(); // 🛑 STOP BROWSER PAGE ZOOM
+                    e.preventDefault();
                     const t1 = e.touches[0], t2 = e.touches[1];
                     const dist = Math.hypot(t1.pageX - t2.pageX, t1.pageY - t2.pageY);
                     const mid = { x: (t1.pageX + t2.pageX) / 2, y: (t1.pageY + t2.pageY) / 2 };
 
-                    const gestureScale = this.initialDist > 5 ? dist / this.initialDist : 1.0;
+                    const gestureScale = this.initialDist > 10 ? dist / this.initialDist : 1.0;
                     const dx = mid.x - this.initialMid.x;
                     const dy = mid.y - this.initialMid.y;
 
                     this.currentTransform = { dx, dy, scale: gestureScale };
 
-                    // Apply visual preview ONLY to the iframe
                     const iframe = getActiveIframe();
                     if (iframe) {
                         const winW = parent.window.innerWidth;
                         const baseScale = Math.min(1.0, (winW - 10) / CANVAS_WIDTH);
-                        const visualScale = baseScale * gestureScale;
-                        iframe.style.transform = `translate(${dx}px, ${dy}px) scale(${visualScale})`;
+                        iframe.style.transform = `translate(${dx}px, ${dy}px) scale(${baseScale * gestureScale})`;
                     }
                 }
             }, { passive: false });
 
-            el.addEventListener('touchend', () => {
+            const finish = () => {
                 if (this.isGesturing) {
                     const { dx, dy, scale } = this.currentTransform;
+                    const iframe = getActiveIframe();
+                    if (iframe) iframe.style.opacity = '1.0';
 
                     const rect = el.getBoundingClientRect();
-                    const pan_sens = 1.0 / this.initialZoom;
-                    const finalZoom = Math.max(1.0, Math.min(4.0, this.initialZoom * scale));
-                    const finalPanX = Math.max(0, Math.min(1, this.initialPan.x - (dx / rect.width) * pan_sens));
-                    const finalPanY = Math.max(0, Math.min(1, this.initialPan.y - (dy / rect.height) * pan_sens));
+
+                    // 1. Calculate the final zoom level
+                    const finalZ = Math.max(1.0, Math.min(4.0, this.initialZoom * scale));
+
+                    if (finalZ <= 1.001) {
+                        this.sync(1.0, 0.5, 0.5);
+                    } else {
+                        // 2. Focal Point Math:
+                        // Normalized focal point on screen (where we started pinching)
+                        const fx = (this.initialMid.x - rect.left) / rect.width;
+                        const fy = (this.initialMid.y - rect.top) / rect.height;
+
+                        // Delta move in screen fractions
+                        const dfx = dx / rect.width;
+                        const dfy = dy / rect.height;
+
+                        // Calculate where the initial focal point was on the image
+                        // Img_Pos = Pan * (1 - 1/Z) + fx/Z
+                        const imgFX = this.initialPan.x * (1 - 1 / this.initialZoom) + fx / this.initialZoom;
+                        const imgFY = this.initialPan.y * (1 - 1 / this.initialZoom) + fy / this.initialZoom;
+
+                        // Calculate the new Pan such that imgFX is at (fx + dfx) in the new view
+                        // Pan2 = [ imgPOS - (fx + dfx)/Z2 ] / (1 - 1/Z2)
+                        const span2 = 1.0 / finalZ;
+                        const finalX = Math.max(0, Math.min(1, (imgFX - (fx + dfx) * span2) / (1 - span2)));
+                        const finalY = Math.max(0, Math.min(1, (imgFY - (fy + dfy) * span2) / (1 - span2)));
+
+                        this.sync(finalZ, finalX, finalY);
+                    }
 
                     this.reset();
                     window.lastPinchTime = Date.now();
-
-                    // Final Sync to backend (triggers page refresh)
-                    this.sync(finalZoom, finalPanX, finalPanY);
                 }
-            });
+            };
+
+            el.addEventListener('touchend', finish);
+            el.addEventListener('touchcancel', finish);
         }
 
         sync(z, px, py) {
