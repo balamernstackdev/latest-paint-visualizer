@@ -4,7 +4,7 @@ import os
 js_path = r'd:\latest paint\assets\js\canvas_touch_handler.js'
 
 with open(js_path, 'r', encoding='utf-8') as f:
-    js_content = f.read()
+    js_content = f.read()    
 
 # 1. Initialize State Variables
 if "window.userZoomLevel" not in js_content:
