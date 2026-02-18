@@ -46,8 +46,8 @@
         window.parent.document.addEventListener('touchstart', e => {
             if (e.touches.length > 1) {
                 window.isCanvasGesturing = true;
-            window.lastPinchDist = Math.hypot(e.touches[1].clientX - e.touches[0].clientX, e.touches[1].clientY - e.touches[0].clientY);
-            window.lastPinchCenter = { x: (e.touches[0].clientX + e.touches[1].clientX) / 2, y: (e.touches[0].clientY + e.touches[1].clientY) / 2 };
+                window.lastPinchDist = Math.hypot(e.touches[1].clientX - e.touches[0].clientX, e.touches[1].clientY - e.touches[0].clientY);
+                window.lastPinchCenter = { x: (e.touches[0].clientX + e.touches[1].clientX) / 2, y: (e.touches[0].clientY + e.touches[1].clientY) / 2 };
             }
         }, { capture: true, passive: true });
     } catch (e) { }
@@ -64,20 +64,20 @@
         el.addEventListener('pointercancel', e => window.activePointers.delete(e.pointerId));
     };
 
-    
-        // 🤏 GLOBAL PINCH HANDLER
-        // 🤏 GLOBAL PINCH & PAN HANDLER (Custom JS)
-        // 🤏 GLOBAL PINCH & PAN HANDLER (Centric Zoom)
+
+    // 🤏 GLOBAL PINCH HANDLER
+    // 🤏 GLOBAL PINCH & PAN HANDLER (Custom JS)
+    // 🤏 GLOBAL PINCH & PAN HANDLER (Centric Zoom)
     const handlePinch = (e) => {
         if (e.touches.length === 2) {
             window.isCanvasGesturing = true;
-            
+
             const t1 = e.touches[0];
             const t2 = e.touches[1];
-            
+
             // Current Distance
             const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
-            
+
             // Current Center
             const cx = (t1.clientX + t2.clientX) / 2;
             const cy = (t1.clientY + t2.clientY) / 2;
@@ -86,32 +86,32 @@
                 // ZOOM CALCULATION
                 const delta = dist / window.lastPinchDist;
                 let newZoom = (window.userZoomLevel || 1.0) * delta;
-                
+
                 // Safety Limits
                 if (newZoom < 0.5) newZoom = 0.5;   // Allow slight undershoot
                 if (newZoom > 8.0) newZoom = 8.0;   // Higher Max Zoom
-                
+
                 window.userZoomLevel = newZoom;
-                
+
                 // PAN CALCULATION (From Finger Movement)
                 if (window.lastPinchCenter && window.lastPinchCenter.x) {
                     const dx = cx - window.lastPinchCenter.x;
                     const dy = cy - window.lastPinchCenter.y;
-                    
+
                     // Simple additive pan (1:1 movement)
                     window.panX = (window.panX || 0) + dx;
                     window.panY = (window.panY || 0) + dy;
                 }
-                
+
                 applyResponsiveScale();
             }
-            
+
             // Update State
             window.lastPinchDist = dist;
             window.lastPinchCenter = { x: cx, y: cy };
             window.lastPinchTime = Date.now();
-            
-            e.preventDefault(); 
+
+            e.preventDefault();
             e.stopPropagation();
         }
     };
@@ -125,14 +125,14 @@
                 setTimeout(() => window.isCanvasGesturing = false, 300);
             }
         }, { capture: true });
-        
+
         // Also attach to local window just in case
         window.addEventListener('touchmove', handlePinch, { capture: true, passive: false });
         window.addEventListener('touchend', e => {
-             if (e.touches.length < 2) window.lastPinchDist = 0;
+            if (e.touches.length < 2) window.lastPinchDist = 0;
         }, { capture: true });
-        
-    } catch (e) {}
+
+    } catch (e) { }
 
     // Config Check
     let config = window.CANVAS_CONFIG || (window.parent ? window.parent.CANVAS_CONFIG : null);
@@ -392,7 +392,7 @@
             this.toolbar.style.display = this.boxes.length > 0 ? 'flex' : 'none';
         }
 
-                onPointerDown(e) {
+        onPointerDown(e) {
             // 🛡️ STRICT GESTURE GUARD
             const touchCount = e.pointerType === 'touch' ? window.activePointers.size : 0;
             if (window.isCanvasGesturing || touchCount > 1 || (Date.now() - window.lastPinchTime < 600)) {
@@ -449,7 +449,7 @@
             this.updateDOM();
         }
 
-                onPointerMove(e) {
+        onPointerMove(e) {
             const touchCount = e.pointerType === 'touch' ? window.activePointers.size : 0;
             if (window.isCanvasGesturing || touchCount > 1) {
                 this.cancelDrawing();
@@ -536,7 +536,7 @@
             this.updateDOM();
         }
 
-                commit() {
+        commit() {
             if (this.boxes.length === 0) return;
             // Coords are already intrinsic. No scale needed (or scale=1).
             const parts = this.boxes.map(b => {
@@ -558,8 +558,8 @@
         }
     }
 
-                    function applyResponsiveScale() {
-        if (window.isCanvasGesturing) return; 
+    function applyResponsiveScale() {
+        if (window.isCanvasGesturing) return;
         try {
             const iframes = parent.document.getElementsByTagName('iframe');
             if (!iframes.length) return;
@@ -575,10 +575,10 @@
             // BASE Scale
             let baseScale = targetWidth / CANVAS_WIDTH;
             if (baseScale < 0.1) baseScale = 0.1;
-            
+
             // Combined Scale
             let totalScale = baseScale * (window.userZoomLevel || 1.0);
-            
+
             // Pan Values
             let px = window.panX || 0;
             let py = window.panY || 0;
@@ -621,16 +621,16 @@
                     // 🛠️ APPLY TO OVERLAY TOO
                     const overlay = wrapper.querySelector('[id$="-overlay"]');
                     if (overlay) {
-                         // Keep base overlay styles but override transform/size
-                         overlay.style.cssText = `
+                        // Keep base overlay styles but override transform/size
+                        overlay.style.cssText = `
                              ${transformStyle}
                              display: block; 
                              z-index: 999;
                              cursor: crosshair;
                              overflow: visible;
                          `;
-                         // Ensure overlay has correct ID style for touch
-                         overlay.style.touchAction = 'none';
+                        // Ensure overlay has correct ID style for touch
+                        overlay.style.touchAction = 'none';
                     }
                 }
             }
@@ -692,7 +692,7 @@
             }
         }
 
-                        onPointerDown(e) {
+        onPointerDown(e) {
             const touchCount = e.pointerType === 'touch' ? window.activePointers.size : 0;
             if (window.isCanvasGesturing || touchCount > 1 || (Date.now() - (window.lastPinchTime || 0) < 600)) return;
             e.stopPropagation();
@@ -724,7 +724,7 @@
             }
         }
 
-                        onPointerMove(e) {
+        onPointerMove(e) {
             if (this.mode === 'freedraw' && this.isDrawing) {
                 const rect = this.overlay.getBoundingClientRect();
                 const scale = rect.width / CANVAS_WIDTH;
@@ -819,13 +819,13 @@
             }
         }
 
-                        commit() {
+        commit() {
             if (!this.isClosed || this.points.length < 3) return;
             // Coords are already intrinsic.
             const ptsStr = this.points.map(p => {
                 return `${Math.round(p.x)},${Math.round(p.y)}`;
             }).join(';');
-            
+
             const val = ptsStr + ',' + Date.now();
             const url = new URL(parent.location.href);
             url.searchParams.set('poly_pts', val);
@@ -864,61 +864,18 @@
             }
         }
 
-                onPointerDown(e) {
+        onPointerDown(e) {
             // 🛡️ STRICT GESTURE GUARD
             const touchCount = e.pointerType === 'touch' ? window.activePointers.size : 0;
             if (window.isCanvasGesturing || touchCount > 1 || (Date.now() - window.lastPinchTime < 600)) {
-                this.cancelDrawing();
+                this.potentialX = null;
                 return;
             }
 
             this.overlay.setPointerCapture(e.pointerId);
-
-            const rect = this.overlay.getBoundingClientRect();
-            // 🔍 COORDINATE MAPPING (Visual -> Intrinsic)
-            // rect.width is the ZOOMED visual width. CANVAS_WIDTH is validation.
-            const scale = rect.width / CANVAS_WIDTH;
-            const x = (e.clientX - rect.left) / scale;
-            const y = (e.clientY - rect.top) / scale;
-
-            // 1. Check Active Handles
-            if (e.target.dataset.handle) {
-                this.isMoving = false;
-                this.isDrawing = false;
-                this.activeHandle = e.target.dataset.handle;
-                this.startBox = { ...this.boxes[this.selectedIndex] };
-                this.startX = x; // Store intrinsic start
-                this.startY = y;
-                return;
-            }
-
-            // 2. Check Box Click (Move)
-            for (let i = this.boxes.length - 1; i >= 0; i--) {
-                const b = this.boxes[i];
-                if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) {
-                    this.selectedIndex = i;
-                    this.isMoving = true;
-                    this.isDrawing = false;
-                    this.activeHandle = null;
-                    this.startX = x;
-                    this.startY = y;
-                    this.startBox = { ...b };
-                    this.updateDOM();
-                    return;
-                }
-            }
-
-            // 3. New Box
-            this.isDrawing = true;
-            this.isMoving = false;
-            this.activeHandle = null;
-            this.startX = x;
-            this.startY = y;
-            const newBox = { x, y, w: 0, h: 0 };
-            this.boxes.push(newBox);
-            this.selectedIndex = this.boxes.length - 1;
-            this.startBox = { ...newBox };
-            this.updateDOM();
+            this.potentialX = e.clientX;
+            this.potentialY = e.clientY;
+            this.potentialTime = Date.now();
         }
 
         onPointerUp(e) {
@@ -974,8 +931,8 @@
                     e.preventDefault();
                     this.isGesturing = true;
                     window.isCanvasGesturing = true;
-            window.lastPinchDist = Math.hypot(e.touches[1].clientX - e.touches[0].clientX, e.touches[1].clientY - e.touches[0].clientY);
-            window.lastPinchCenter = { x: (e.touches[0].clientX + e.touches[1].clientX) / 2, y: (e.touches[0].clientY + e.touches[1].clientY) / 2 };
+                    window.lastPinchDist = Math.hypot(e.touches[1].clientX - e.touches[0].clientX, e.touches[1].clientY - e.touches[0].clientY);
+                    window.lastPinchCenter = { x: (e.touches[0].clientX + e.touches[1].clientX) / 2, y: (e.touches[0].clientY + e.touches[1].clientY) / 2 };
 
                     const t1 = e.touches[0], t2 = e.touches[1];
                     // 📏 Use clientX/Y to match getBoundingClientRect (Viewport coords)
