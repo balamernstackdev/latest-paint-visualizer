@@ -401,19 +401,6 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                     if len(parts) < 4: continue
                     
                     x1, y1, x2, y2 = float(parts[0]), float(parts[1]), float(parts[2]), float(parts[3])
-                    # Fix Coords (Already Intrinsic via my JS fix)
-                    # Coordinates from JS are now [0..CANVAS_WIDTH] (Zoomed Visual)
-                    # Wait, my JS fix maps to INTRINSIC SCALE?
-                    # My JS 'scale = rect.width / CANVAS_WIDTH' means we output coordinates proportional to CANVAS_WIDTH (which is backend width).
-                    # So NO adjustment needed here?
-                    # Let's verify. JS logic outputs x in [0, CANVAS_WIDTH].
-                    # Python `display_width` matches that? 
-                    # Actually `display_width` in this function call is used for resizing.
-                    # The `scale_factor` pass-in is `img_width / display_width`.
-                    
-                    # If JS sends intrinsic coords (0..1000), and image is (1000..1000), then x1,y1 are correct?
-                    # But if we are zoomed/cropped?
-                    # JS 'CANVAS_WIDTH' usually matches `display_width`.
                     
                     bx1 = int(x1 / scale_factor) + start_x
                     by1 = int(y1 / scale_factor) + start_y
@@ -490,9 +477,6 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
             if is_valid:
                 initial_drawing["objects"].append(obj)
 
-    # ... (skipping url_pts_raw logic for brevity as it was not changed) ...
-
-    # CANVAS CALL
     canvas_result = st_canvas(
         fill_color="rgba(255, 165, 0, 0.3)",
         stroke_width=2,
@@ -510,3 +494,99 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
 
     if canvas_result.json_data:
         st.session_state["canvas_raw"] = canvas_result.json_data
+
+# --- RESTORED FUNCTIONS ---
+
+def render_visualizer_engine_v11(display_width=800):
+    """Main engine that orchestrates the canvas and drawing modes."""
+    if "image" not in st.session_state or st.session_state["image"] is None:
+        return
+
+    # 1. Dimensions
+    img = st.session_state["image"]
+    h, w = img.shape[:2]
+    
+    # 2. View Calculation
+    zoom = st.session_state.get("zoom_level", 1.0)
+    pan_x = st.session_state.get("pan_x", 0.5)
+    pan_y = st.session_state.get("pan_y", 0.5)
+    
+    start_x, start_y, view_w, view_h = get_crop_params(w, h, zoom, pan_x, pan_y)
+    scale_factor = display_width / view_w
+    
+    # 3. Determine Mode
+    tool = st.session_state.get("selection_tool", "👆 AI Click (Point)")
+    mode = "point"
+    if "Box" in tool: mode = "rect"
+    elif "Lasso" in tool: mode = "freedraw"
+    elif "Polygon" in tool: mode = "polygon"
+    elif "Paint" in tool: mode = "freedraw"
+    elif "Wand" in tool: mode = "point"
+    elif "Eraser" in tool: mode = "transform" # Use transform for erasing/moving? Or freedraw? Typically Eraser is just an operation mode using click/drag.
+    
+    # 4. Render Canvas Fragment
+    render_visualizer_canvas_fragment_v11(
+        display_width, start_x, start_y, view_w, view_h, 
+        scale_factor, h, w, mode
+    )
+
+def render_sidebar(sam_engine, device_str):
+    """Renders the sidebar controls."""
+    with st.sidebar:
+        st.title("🎨 Visualizer")
+        
+        # 1. Image Upload
+        uploaded_file = st.file_uploader("Upload Image", type=["jpg", "png", "jpeg"], key="uploaded_file")
+        if uploaded_file is not None:
+             # Basic handling if not handled elsewhere
+             try:
+                 file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
+                 image = cv2.imdecode(file_bytes, 1)
+                 image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+                 
+                 # Only update if new
+                 if "image_hash" not in st.session_state or st.session_state["image_hash"] != uploaded_file.name:
+                     st.session_state["image"] = image
+                     st.session_state["image_hash"] = uploaded_file.name
+                     st.session_state["masks"] = []
+                     st.session_state["canvas_id"] += 1
+                     st.rerun()
+             except: pass
+        
+        st.divider()
+
+        # 2. Tool Selection
+        st.subheader("🛠️ Tools")
+        st.radio("Select Tool", list(TOOL_MAPPING.values()), key="sidebar_tool_radio", on_change=cb_sidebar_tool_sync)
+        
+        # Paint Color
+        sidebar_paint_fragment()
+        
+        st.divider()
+        
+        # 3. Operation
+        st.subheader("⚙️ Operation")
+        st.radio("Mode", ["Add", "Subtract"], key="sidebar_op_radio", on_change=cb_sidebar_op_sync)
+        
+        st.checkbox("Restict to Walls", key="sidebar_wall_toggle", on_change=cb_sidebar_wall_sync)
+        
+        st.divider()
+        
+        # 4. Layers
+        st.subheader("📚 Layers")
+        if st.button("🗑️ Clear All Layers", use_container_width=True):
+            cb_clear_all()
+            st.rerun()
+            
+        for i, layer in enumerate(st.session_state.get("masks", [])):
+            with st.expander(f"{layer['name']}", expanded=False):
+                col1, col2 = st.columns([1, 1])
+                with col1:
+                    if st.button("👁️ Toggle", key=f"vis_{i}"):
+                        layer['visible'] = not layer['visible']
+                        st.session_state["render_id"] += 1
+                        st.rerun()
+                with col2:
+                    if st.button("❌ Delete", key=f"del_{i}"):
+                        cb_delete_layer(i)
+                        st.rerun()
