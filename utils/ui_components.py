@@ -293,16 +293,16 @@ def setup_styles():
             .desktop-only {{ display: none !important; }}
             
             /* 📱 MOBILE PINCH-ZOOM LOCKDOWN */
-        html, body, .stApp {
+        html, body, .stApp {{
             touch-action: manipulation !important;
             overscroll-behavior-y: none;
-        }
+        }}
 
         iframe[title="streamlit_drawable_canvas.st_canvas"], 
         .element-container iframe,
-        [id$="-overlay"] {
+        [id$="-overlay"] {{
             touch-action: none !important;
-        }
+        }}
 
         [data-testid="stSidebar"] {{
                 transition: transform 0.3s cubic-bezier(0, 0, 0.2, 1) !important;
