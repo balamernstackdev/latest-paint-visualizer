@@ -488,13 +488,16 @@
     }
 
     function applyResponsiveScale() {
+        if (window.isCanvasGesturing) return; // 🛑 DON'T FIGHT WITH GESTURE PREVIEW
+        const now = Date.now();
+        if (now - (window.lastPinchTime || 0) < 1000) return; // Delay snap-back
+
         try {
             const iframes = parent.document.getElementsByTagName('iframe');
             if (!iframes.length) return;
 
             const winW = parent.window.innerWidth;
-            const targetWidth = winW < 1024 ? winW - 20 : winW;
-
+            const targetWidth = winW < 1024 ? winW - 10 : winW - 40;
             if (targetWidth <= 0 || !CANVAS_WIDTH) return;
 
             const scale = Math.min(1.0, targetWidth / CANVAS_WIDTH);
@@ -502,19 +505,24 @@
             for (let iframe of iframes) {
                 if (iframe.title === "streamlit_drawable_canvas.st_canvas" || iframe.src.includes('streamlit_drawable_canvas')) {
                     const wrapper = iframe.parentElement;
-                    wrapper.style.width = (CANVAS_WIDTH * scale) + "px";
-                    wrapper.style.height = (CANVAS_HEIGHT * scale) + "px";
-                    wrapper.style.position = "relative";
-                    wrapper.style.overflow = "hidden";
-                    wrapper.style.margin = "0 auto";
-                    wrapper.style.touchAction = "none";
+                    wrapper.style.cssText = `
+                        width: ${CANVAS_WIDTH * scale}px;
+                        height: ${CANVAS_HEIGHT * scale}px;
+                        position: relative;
+                        overflow: hidden;
+                        margin: 0 auto;
+                        touch-action: none;
+                    `;
 
-                    iframe.style.width = CANVAS_WIDTH + "px";
-                    iframe.style.height = CANVAS_HEIGHT + "px";
-                    iframe.style.transform = `scale(${scale})`;
-                    iframe.style.transformOrigin = "top left";
-                    iframe.style.position = "absolute";
-                    iframe.style.touchAction = "none";
+                    iframe.style.cssText = `
+                        width: ${CANVAS_WIDTH}px;
+                        height: ${CANVAS_HEIGHT}px;
+                        transform: scale(${scale});
+                        transform-origin: top left;
+                        position: absolute;
+                        top: 0; left: 0;
+                        touch-action: none;
+                    `;
                 }
             }
         } catch (e) { }
@@ -812,59 +820,84 @@
 
     class MultiTouchHandler {
         constructor() {
-            this.lastUpdate = 0;
+            this.reset();
+        }
+
+        reset() {
+            this.isGesturing = false;
             this.initialDist = 0;
             this.initialZoom = 1.0;
             this.initialPan = { x: 0.5, y: 0.5 };
             this.initialMid = { x: 0, y: 0 };
-            this.isGesturing = false;
+            this.currentTransform = { dx: 0, dy: 0, scale: 1 };
+            window.isCanvasGesturing = false;
         }
 
         attach(el) {
             el.addEventListener('touchstart', (e) => {
                 if (e.touches.length === 2) {
+                    e.preventDefault(); // 🛑 STOP BROWSER PAGE ZOOM
+                    this.isGesturing = true;
+                    window.isCanvasGesturing = true;
+
                     const t1 = e.touches[0], t2 = e.touches[1];
                     this.initialDist = Math.hypot(t1.pageX - t2.pageX, t1.pageY - t2.pageY);
                     this.initialMid = { x: (t1.pageX + t2.pageX) / 2, y: (t1.pageY + t2.pageY) / 2 };
+
+                    const config = window.CANVAS_CONFIG || {};
                     this.initialZoom = config.ZOOM_LEVEL || 1.0;
                     this.initialPan = { x: config.CUR_PAN_X || 0.5, y: config.CUR_PAN_Y || 0.5 };
-                    this.isGesturing = true;
-                    window.isCanvasGesturing = true; // Block editor interactions
+
+                    const iframe = getActiveIframe();
+                    if (iframe) {
+                        iframe.style.transition = 'none';
+                        const rect = el.getBoundingClientRect();
+                        const ox = ((this.initialMid.x - rect.left) / rect.width) * 100;
+                        const oy = ((this.initialMid.y - rect.top) / rect.height) * 100;
+                        iframe.style.transformOrigin = `${ox}% ${oy}%`;
+                    }
                 }
             }, { passive: false });
 
             el.addEventListener('touchmove', (e) => {
                 if (this.isGesturing && e.touches.length === 2) {
-                    e.preventDefault();
+                    e.preventDefault(); // 🛑 STOP BROWSER PAGE ZOOM
                     const t1 = e.touches[0], t2 = e.touches[1];
                     const dist = Math.hypot(t1.pageX - t2.pageX, t1.pageY - t2.pageY);
                     const mid = { x: (t1.pageX + t2.pageX) / 2, y: (t1.pageY + t2.pageY) / 2 };
 
-                    const scale = dist / this.initialDist;
-                    const newZoom = Math.max(1.0, Math.min(4.0, this.initialZoom * scale));
+                    const gestureScale = this.initialDist > 5 ? dist / this.initialDist : 1.0;
+                    const dx = mid.x - this.initialMid.x;
+                    const dy = mid.y - this.initialMid.y;
 
-                    const dx_px = mid.x - this.initialMid.x;
-                    const dy_px = mid.y - this.initialMid.y;
+                    this.currentTransform = { dx, dy, scale: gestureScale };
 
-                    const pan_sens = 1.0 / (config.ZOOM_LEVEL || 1.0);
-                    const newPanX = Math.max(0, Math.min(1, this.initialPan.x - (dx_px / CANVAS_WIDTH) * pan_sens));
-                    const newPanY = Math.max(0, Math.min(1, this.initialPan.y - (dy_px / CANVAS_HEIGHT) * pan_sens));
-
-                    const now = Date.now();
-                    if (now - this.lastUpdate > 120) { // Much faster updates for smoother panning
-                        if (Math.abs(newZoom - this.initialZoom) > 0.02 || Math.abs(newPanX - this.initialPan.x) > 0.005 || Math.abs(newPanY - this.initialPan.y) > 0.005) {
-                            this.sync(newZoom, newPanX, newPanY);
-                            this.lastUpdate = now;
-                        }
+                    // Apply visual preview ONLY to the iframe
+                    const iframe = getActiveIframe();
+                    if (iframe) {
+                        const winW = parent.window.innerWidth;
+                        const baseScale = Math.min(1.0, (winW - 10) / CANVAS_WIDTH);
+                        const visualScale = baseScale * gestureScale;
+                        iframe.style.transform = `translate(${dx}px, ${dy}px) scale(${visualScale})`;
                     }
                 }
             }, { passive: false });
 
             el.addEventListener('touchend', () => {
                 if (this.isGesturing) {
-                    this.isGesturing = false;
-                    window.isCanvasGesturing = false;
+                    const { dx, dy, scale } = this.currentTransform;
+
+                    const rect = el.getBoundingClientRect();
+                    const pan_sens = 1.0 / this.initialZoom;
+                    const finalZoom = Math.max(1.0, Math.min(4.0, this.initialZoom * scale));
+                    const finalPanX = Math.max(0, Math.min(1, this.initialPan.x - (dx / rect.width) * pan_sens));
+                    const finalPanY = Math.max(0, Math.min(1, this.initialPan.y - (dy / rect.height) * pan_sens));
+
+                    this.reset();
                     window.lastPinchTime = Date.now();
+
+                    // Final Sync to backend (triggers page refresh)
+                    this.sync(finalZoom, finalPanX, finalPanY);
                 }
             });
         }

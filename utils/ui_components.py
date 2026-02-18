@@ -292,8 +292,19 @@ def setup_styles():
         @media (max-width: 768px) {{
             .desktop-only {{ display: none !important; }}
             
-            /* 📱 Mobile Sidebar Adjustments */
-            [data-testid="stSidebar"] {{
+            /* 📱 MOBILE PINCH-ZOOM LOCKDOWN */
+        html, body, .stApp {
+            touch-action: manipulation !important;
+            overscroll-behavior-y: none;
+        }
+
+        iframe[title="streamlit_drawable_canvas.st_canvas"], 
+        .element-container iframe,
+        [id$="-overlay"] {
+            touch-action: none !important;
+        }
+
+        [data-testid="stSidebar"] {{
                 transition: transform 0.3s cubic-bezier(0, 0, 0.2, 1) !important;
                 width: 82vw !important;
                 min-width: 82vw !important;
@@ -420,11 +431,23 @@ def setup_styles():
     
     st.markdown(full_css, unsafe_allow_html=True)
 
-    # --- SILENCE CONSOLE WARNINGS (Main Window Injection) ---
-    # This script intercepts browser console warnings originating from Streamlit or dependencies
+    # --- SILENCE CONSOLE WARNINGS & LOCK VIEWPORT ---
     st.markdown("""
         <script>
         (function() {
+            // 🔒 LOCK VIEWPORT (Prevent Page Zoom)
+            const meta = window.parent.document.createElement('meta');
+            meta.name = 'viewport';
+            meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover';
+            
+            // Check if meta exists, replace if so, else append
+            const existing = window.parent.document.querySelector('meta[name="viewport"]');
+            if (existing) {
+                existing.content = meta.content;
+            } else {
+                window.parent.document.getElementsByTagName('head')[0].appendChild(meta);
+            }
+
             const _backupWarn = console.warn;
             const _backupError = console.error;
             
