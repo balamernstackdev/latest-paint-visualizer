@@ -2,7 +2,7 @@ import streamlit as st
 import numpy as np
 import cv2
 from scipy import sparse
-from utils.performance import cleanup_session_caches, should_trigger_cleanup
+from .performance import cleanup_session_caches, should_trigger_cleanup
 
 def initialize_session_state():
     """Initialize all session state variables with multi-layer safety."""

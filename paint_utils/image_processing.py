@@ -3,7 +3,7 @@ import numpy as np
 import streamlit as st
 from PIL import Image
 from core.colorizer import ColorTransferEngine
-from config.constants import UIConfig
+from app_config.constants import UIConfig
 
 def get_crop_params(image_width, image_height, zoom_level, pan_x, pan_y):
     """

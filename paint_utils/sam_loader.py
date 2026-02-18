@@ -3,7 +3,7 @@ import torch
 import threading
 import streamlit as st
 from core.segmentation import SegmentationEngine, sam_model_registry
-from config.constants import PerformanceConfig
+from app_config.constants import PerformanceConfig
 
 # --- CONSTANTS ---
 MODEL_TYPE = PerformanceConfig.SAM_MODEL_TYPE

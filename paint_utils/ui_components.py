@@ -1358,7 +1358,7 @@ def render_sidebar(sam, device_str):
                 file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
                 image = cv2.cvtColor(cv2.imdecode(file_bytes, 1), cv2.COLOR_BGR2RGB)
                 st.session_state["image_original"] = image.copy()
-                from config.constants import PerformanceConfig
+                from app_config.constants import PerformanceConfig
                 max_dim = PerformanceConfig.MAX_IMAGE_DIMENSION
                 h, w = image.shape[:2]
                 if max(h, w) > max_dim:

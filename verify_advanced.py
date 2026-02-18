@@ -18,11 +18,11 @@ sys.modules["streamlit"] = mock_st
 # Mock performance utils
 mock_perf = MagicMock()
 mock_perf.should_trigger_cleanup.return_value = False
-sys.modules["utils.performance"] = mock_perf
+sys.modules["paint_utils.performance"] = mock_perf
 
 # Now we can import the modules to test
-from utils.ui_components import process_lasso_path
-from utils.state_manager import cb_apply_pending
+from paint_utils.ui_components import process_lasso_path
+from paint_utils.state_manager import cb_apply_pending
 
 def test_advanced_selection():
     print("Running Advanced Selection Logic Tests...")

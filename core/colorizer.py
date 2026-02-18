@@ -3,7 +3,7 @@ import numpy as np
 from PIL import Image
 import streamlit as st
 from scipy import sparse
-from config.constants import ColorizerConfig
+from app_config.constants import ColorizerConfig
 
 # Try to import adaptive processing, but make it optional
 try:
@@ -341,7 +341,7 @@ class ColorTransferEngine:
         # 2. Tile Texture to fill image
         h, w, c = image_rgb.shape
         th, tw, tc = texture_rgb.shape
-        #hello
+        
         # Resize texture if too large to keep pattern visible
         if max(th, tw) > ColorizerConfig.MAX_TEXTURE_SIZE:
             scale = ColorizerConfig.MAX_TEXTURE_SIZE / max(th, tw)

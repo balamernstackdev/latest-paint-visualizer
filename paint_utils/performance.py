@@ -9,7 +9,7 @@ import streamlit as st
 import numpy as np
 import gc
 from typing import Optional, List, Dict, Any
-from config.constants import MAX_IMAGE_DIMENSION
+from app_config.constants import MAX_IMAGE_DIMENSION
 
 
 def cleanup_session_caches(aggressive: bool = False):

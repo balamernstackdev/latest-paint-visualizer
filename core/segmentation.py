@@ -3,7 +3,7 @@ import torch
 import cv2
 import logging
 from mobile_sam import sam_model_registry, SamPredictor
-from config.constants import SegmentationConfig
+from app_config.constants import SegmentationConfig
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')

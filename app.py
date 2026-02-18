@@ -25,12 +25,13 @@ st.set_page_config(
 )
 
 # --- UTILITIES IMPORT ---
-from utils.encoding import image_to_url_patch
-from utils.sam_loader import get_sam_engine, ensure_model_exists, CHECKPOINT_PATH, MODEL_TYPE
-from utils.state_manager import initialize_session_state, cb_apply_pending
-from utils.ui_components import setup_styles, render_sidebar, render_visualizer_engine_v11, TOOL_MAPPING
-from utils.image_processing import get_crop_params, magic_wand_selection
-from config.constants import PerformanceConfig
+from paint_utils.encoding import image_to_url_patch
+from paint_utils.sam_loader import get_sam_engine, ensure_model_exists, CHECKPOINT_PATH, MODEL_TYPE
+from paint_utils.state_manager import initialize_session_state, cb_apply_pending
+from paint_utils.ui_components import setup_styles, render_sidebar, render_visualizer_engine_v11, TOOL_MAPPING
+from paint_utils.image_processing import get_crop_params, magic_wand_selection
+from core.segmentation import SegmentationEngine, sam_model_registry
+from app_config.constants import PerformanceConfig
 
 # --- 1️⃣ SESSION INITIALIZATION (VERY TOP)
 initialize_session_state()
@@ -95,7 +96,7 @@ def main():
         print(f"DEBUG: BOX PARAM DETECTED -> {box_param}")
         
         # Check if we are already processing this
-        from utils.async_processor import submit_sam_task, check_async_task
+        from paint_utils.async_processor import submit_sam_task, check_async_task
         async_status = check_async_task()
         
         if async_status == "running":
@@ -295,7 +296,7 @@ def main():
         print(f"DEBUG: Processing Mobile Tap (AI) -> {tap_param}")
         
         # Check if we are already processing this
-        from utils.async_processor import submit_sam_task, check_async_task
+        from paint_utils.async_processor import submit_sam_task, check_async_task
         async_status = check_async_task()
         
         if async_status == "running":
@@ -582,3 +583,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

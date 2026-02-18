@@ -9,7 +9,7 @@ import cv2
 import numpy as np
 from enum import Enum
 from typing import Tuple, Dict, Any
-from config.constants import AdaptiveProcessingConfig
+from app_config.constants import AdaptiveProcessingConfig
 
 
 class ObjectType(Enum):
