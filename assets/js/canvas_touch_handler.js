@@ -66,6 +66,7 @@
 
     
         // 🤏 GLOBAL PINCH HANDLER
+        // 🤏 GLOBAL PINCH & PAN HANDLER (Custom JS)
     const handlePinch = (e) => {
         if (e.touches.length === 2) {
             window.isCanvasGesturing = true;
@@ -81,11 +82,11 @@
                 const delta = dist / window.lastPinchDist;
                 let newZoom = (window.userZoomLevel || 1.0) * delta;
                 if (newZoom < 1.0) newZoom = 1.0;
-                if (newZoom > 5.0) newZoom = 5.0;
+                if (newZoom > 5.0) newZoom = 5.0; // Max Scale
                 window.userZoomLevel = newZoom;
                 
                 // PAN
-                if (window.lastPinchCenter) {
+                if (window.lastPinchCenter && window.lastPinchCenter.x) {
                     const dx = cx - window.lastPinchCenter.x;
                     const dy = cy - window.lastPinchCenter.y;
                     window.panX = (window.panX || 0) + dx;
@@ -560,7 +561,7 @@
         }
     }
 
-        function applyResponsiveScale() {
+            function applyResponsiveScale() {
         if (window.isCanvasGesturing) return; 
         try {
             const iframes = parent.document.getElementsByTagName('iframe');
@@ -574,30 +575,41 @@
             const targetWidth = winW < 1024 ? winW - 4 : winW - 40;
             if (targetWidth <= 50 || !CANVAS_WIDTH) return;
 
-            let scale = targetWidth / CANVAS_WIDTH;
-            if (scale < 0.1) scale = 0.1;
+            // BASE Scale (to fit screen initially)
+            let baseScale = targetWidth / CANVAS_WIDTH;
+            if (baseScale < 0.1) baseScale = 0.1;
+            
+            // USER Zoom (multiplied)
+            let totalScale = baseScale * (window.userZoomLevel || 1.0);
 
             for (let iframe of iframes) {
                 if (iframe.title === "streamlit_drawable_canvas.st_canvas" || iframe.src.includes('streamlit_drawable_canvas')) {
                     const wrapper = iframe.parentElement;
                     if (!wrapper) continue;
 
+                    // Wrapper stays at base size (or should it grow? No, wrapper is viewport)
+                    // If wrapper grows, layout breaks. Wrapper should be fixed size (viewport).
+                    // Canvas transforms INSIDE wrapper.
+                    // Actually, if we want to pan, wrapper should clip? yes.
+                    
                     wrapper.style.cssText = `
-                        width: ${Math.floor(CANVAS_WIDTH * scale)}px;
-                        height: ${Math.floor(CANVAS_HEIGHT * scale)}px;
+                        width: ${Math.floor(CANVAS_WIDTH * baseScale)}px;
+                        height: ${Math.floor(CANVAS_HEIGHT * baseScale)}px;
                         position: relative;
                         margin: 0 auto !important;
                         display: block !important;
-                        overflow: visible;
+                        overflow: hidden; /* Clip the zoomed content */
+                        touch-action: none;
                     `;
 
                     iframe.style.cssText = `
                         width: ${CANVAS_WIDTH}px;
                         height: ${CANVAS_HEIGHT}px;
-                        transform: scale(${scale});
+                        transform: translate(${window.panX || 0}px, ${window.panY || 0}px) scale(${totalScale});
                         transform-origin: top left;
                         position: absolute;
                         top: 0; left: 0;
+                        touch-action: none;
                         opacity: 1;
                     `;
                 }

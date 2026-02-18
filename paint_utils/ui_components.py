@@ -234,7 +234,7 @@ def setup_styles():
         iframe[title="streamlit_drawable_canvas.st_canvas"], 
         .element-container iframe,
         [id$="-overlay"] {{
-            touch-action: pan-x pan-y pinch-zoom !important;
+            touch-action: none !important;
             -webkit-touch-callout: none !important;
             -webkit-user-select: none !important;
             user-select: none !important;
@@ -323,7 +323,7 @@ def setup_styles():
         iframe[title="streamlit_drawable_canvas.st_canvas"], 
         .element-container iframe,
         [id$="-overlay"] {{
-            touch-action: pan-x pan-y pinch-zoom !important;
+            touch-action: none !important;
             -webkit-touch-callout: none !important;
             -webkit-user-select: none !important;
             user-select: none !important;
