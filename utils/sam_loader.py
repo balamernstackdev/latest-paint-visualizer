@@ -52,8 +52,21 @@ def get_sam_engine_singleton_v2(checkpoint_path, model_type, salt=""):
     return SegmentationEngine(model_instance=model, device=device)
 
 def get_sam_engine(checkpoint_path=CHECKPOINT_PATH, model_type=MODEL_TYPE):
-    """Wrapped getter."""
-    return get_sam_engine_singleton_v2(checkpoint_path, model_type, salt=CACHE_SALT)
+    """
+    Get the SAM engine. 
+    The heavy model weights are cached globally via @st.cache_resource,
+    but the engine (which holds the current image embeddings) is per-session.
+    """
+    model = get_sam_model(checkpoint_path, model_type, salt=CACHE_SALT)
+    if model is None:
+        return None
+        
+    if "sam_engine" not in st.session_state:
+        from core.segmentation import SegmentationEngine
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        st.session_state["sam_engine"] = SegmentationEngine(model_instance=model, device=device)
+        
+    return st.session_state["sam_engine"]
 
 def ensure_model_exists():
     """Download weights automatically if missing."""

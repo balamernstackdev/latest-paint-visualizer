@@ -33,32 +33,10 @@ def composite_image(original_rgb, masks_data):
     """
     visible_masks = [m for m in masks_data if m.get('visible', True)]
     
-    # --- Real-time Mask Refinement ---
-    processed_masks = []
-    for m_data in visible_masks:
-        m_copy = m_data.copy()
-        
-        # ⚡ OPTIMIZATION: Handle Sparse Masks
-        raw_mask = m_data['mask']
-        from scipy import sparse
-        if sparse.issparse(raw_mask):
-            raw_mask = raw_mask.toarray()
-        m_copy['mask'] = raw_mask # Store dense for processing
-
-        ref = m_data.get('refinement', 0)
-        if ref != 0:
-            kernel_size = abs(ref) * 2 + 1
-            kernel = np.ones((kernel_size, kernel_size), np.uint8)
-            mask_uint8 = raw_mask.astype(np.uint8) * 255
-            if ref > 0:
-                refined_mask = cv2.dilate(mask_uint8, kernel, iterations=1)
-            else:
-                refined_mask = cv2.erode(mask_uint8, kernel, iterations=1)
-            m_copy['mask'] = refined_mask > 127
-        processed_masks.append(m_copy)
-
     # 🎯 ULTRA-STABLE FULL COMPOSITE 🎯
-    result = ColorTransferEngine.composite_multiple_layers(original_rgb, processed_masks)
+    # Optimization: Pass original mask objects to Core to enable identity-based caching.
+    # The Core engine handles sparse decompression and refinement internally.
+    result = ColorTransferEngine.composite_multiple_layers(original_rgb, visible_masks)
 
     # --- Selection Highlight (Fast Blending) ---
     try:

@@ -13,7 +13,7 @@ def initialize_session_state():
         "masks": [],
         "masks_redo": [],
         "selection_op": "Add",
-        "is_wall_only": True,
+        "is_wall_only": False,
         "selection_softness": 0,
         "selection_highlight_opacity": 0.5,
         "zoom_level": 1.0,
@@ -45,7 +45,7 @@ def cb_apply_pending(increment_canvas=True, silent=False):
             'color': st.session_state["picked_color"],
             'visible': True,
             'name': f"Layer {len(st.session_state['masks'])+1}",
-            'refinement': 0, # Expansion/Contraction (-10 to 10)
+            'refinement': st.session_state.get("selection_refinement", 0), # Expansion/Contraction (-10 to 10)
             'softness': st.session_state.get("selection_softness", 0),
             'brightness': 0.0, 'contrast': 1.0, 'saturation': 1.0, 'hue': 0.0, 
             'opacity': st.session_state.get("selection_highlight_opacity", 1.0), 

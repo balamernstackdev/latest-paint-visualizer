@@ -18,6 +18,7 @@ from .encoding import image_to_url_patch
 from .state_manager import cb_undo, cb_redo, cb_clear_all, cb_delete_layer, cb_apply_pending, cb_cancel_pending
 from .image_processing import get_crop_params, composite_image, process_lasso_path
 from .sam_loader import get_sam_engine, CHECKPOINT_PATH, MODEL_TYPE
+from .performance import cleanup_session_caches
 
 # --- UI CONSTANTS ---
 TOOL_MAPPING = {
@@ -25,7 +26,7 @@ TOOL_MAPPING = {
     "✨": "✨ AI Object (Box)",
     "🕸️": "🕸️ Polygonal Lasso",
     "✏️": "✏️ Paint Brush",
-    "🧹": "🧹 Eraser",
+    "🧹": "🧹 Eraser Tool",
     "🪄": "🪄 Magic Wand"
 }
 
@@ -55,10 +56,8 @@ def cb_top_wall_sync_v2():
 
 def cb_sidebar_tool_sync(widget_key=None):
     """Sync sidebar radio to master selection_tool and top ICON switcher."""
-    # Use dynamic key based on current canvas_id
-    if widget_key is None:
-        cid = st.session_state.get("canvas_id", 0)
-        widget_key = f"sidebar_tool_radio_{cid}"
+    # Use stable static key to prevent 'ping-pong' switching
+    widget_key = "sidebar_tool_radio"
     
     new_tool = st.session_state.get(widget_key)
     print(f"DEBUG: CALLBACK sidebar_tool_radio -> {new_tool} (Current: {st.session_state.get('selection_tool')})")
@@ -210,8 +209,6 @@ def setup_styles():
             style_content = f.read()
             
     # Combined static and dynamic CSS
-    sidebar_transform = '0' if st.session_state.get("sidebar_p_open") else '-100%'
-    
     pass
     
     full_css = textwrap.dedent(f"""
@@ -227,7 +224,16 @@ def setup_styles():
             --font: "Segoe UI", sans-serif;
         }}
         
+        /* 📱 MOBILE PINCH-ZOOM LOCKDOWN */
+        html, body, .stApp {{
+            touch-action: manipulation !important; /* Disables double-tap to zoom, but allows scroll */
+        }}
 
+        iframe[title="streamlit_drawable_canvas.st_canvas"], 
+        .element-container iframe,
+        [id$="-overlay"] {{
+            touch-action: none !important; /* Complete control for our JS handlers */
+        }}
         
         [data-testid="stSidebar"] {{
             background-color: #f8f9fa !important; 
@@ -239,24 +245,124 @@ def setup_styles():
             .m-open-container, .mobile-only {{ display: none !important; }}
         }}
 
+        /* 🔓 GLOBAL TOGGLE PERSISTENCE (Clean Icon-Only) */
+        header[data-testid="stSidebarHeader"] {{
+            visibility: visible !important;
+            display: flex !important;
+            justify-content: space-between !important;
+            align-items: center !important;
+            padding: 10px 15px !important;
+            background: transparent !important;
+        }}
+
+        [data-testid="stSidebarCollapseButton"] {{
+            visibility: visible !important;
+            display: flex !important;
+            opacity: 1 !important;
+        }}
+
+        [data-testid="stSidebarCollapseButton"] button {{
+            background: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+            color: #31333F !important;
+            padding: 0 !important;
+            width: auto !important;
+            height: auto !important;
+        }}
+
+        [data-testid="stSidebarCollapseButton"] button:hover {{
+            background: rgba(0,0,0,0.05) !important;
+            border-radius: 4px !important;
+        }}
+
+        /* Clean positioning for the bare icons */
+        [data-testid="stSidebar"] [data-testid="stSidebarCollapseButton"] {{
+            position: absolute !important;
+            top: 15px !important;
+            right: 15px !important;
+            z-index: 10000 !important;
+        }}
+
+        section[data-testid="stMain"] [data-testid="stSidebarCollapseButton"] {{
+            position: fixed !important;
+            top: 15px !important;
+            left: 15px !important;
+            z-index: 10000 !important;
+        }}
+
+        /* Icon Styling */
+        [data-testid="stSidebarHeader"] svg {{
+            fill: #31333F !important;
+            width: 22px !important;
+            height: 22px !important;
+        }}
+
         @media (max-width: 768px) {{
             .desktop-only {{ display: none !important; }}
+            
+            /* 📱 Mobile Sidebar Adjustments */
+            [data-testid="stSidebar"] {{
+                transition: transform 0.3s cubic-bezier(0, 0, 0.2, 1) !important;
+                width: 82vw !important;
+                min-width: 82vw !important;
+            }}
+            
+            /* Anti-Squash internal container */
+            [data-testid="stSidebar"] > div:first-child {{
+                width: 100% !important;
+                min-width: 100% !important;
+            }}
+
+            /* DO NOT HIDE [data-testid="stSidebar"] + div as it is the main workspace */
+            /* 🚫 Instead, just neutralize the overlay via JS only */
+
             .mobile-bottom-actions {{
                 position: fixed;
                 bottom: 20px;
                 left: 10px;
                 right: 10px;
-                background: rgba(255, 255, 255, 0.9);
-                backdrop-filter: blur(10px);
-                padding: 10px;
-                border-radius: 15px;
-                box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+                background: rgba(255, 255, 255, 0.95);
+                backdrop-filter: blur(15px);
+                padding: 12px;
+                border-radius: 20px;
+                box-shadow: 0 10px 30px rgba(0,0,0,0.2);
                 z-index: 1000;
+                border: 1px solid rgba(255,255,255,0.3);
             }}
-            /* Add padding to bottom of page so content doesn't get hidden under fixed buttons */
+            
             .main .block-container {{
-                padding-bottom: 120px !important;
+                padding-bottom: 140px !important;
+                padding-top: 1rem !important;
             }}
+        }}
+
+        /* 💎 Ultra-Compact Sidebar */
+        .sidebar-divider {{
+            height: 1px;
+            background: rgba(0,0,0,0.05);
+            margin: 5px 0 !important;
+            width: 100%;
+        }}
+
+        .sidebar-card {{
+            padding: 2px 0 !important;
+            margin-bottom: 2px !important;
+            background: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+        }}
+
+        .sidebar-header-text {{
+            font-size: 0.8rem !important;
+            font-weight: 700;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 5px !important;
+            display: flex;
+            align-items: center;
+            gap: 6px;
         }}
 
 
@@ -323,15 +429,27 @@ def setup_styles():
     
     st.markdown(full_css, unsafe_allow_html=True)
 
-    # --- SILENCE CONSOLE WARNINGS (Main Window Injection) ---
-    # This script intercepts browser console warnings originating from Streamlit or dependencies
+    # --- SILENCE CONSOLE WARNINGS & LOCK VIEWPORT ---
     st.markdown("""
         <script>
         (function() {
+            // 🔒 LOCK VIEWPORT (Prevent Page Zoom)
+            const meta = window.parent.document.createElement('meta');
+            meta.name = 'viewport';
+            meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover';
+            
+            // Check if meta exists, replace if so, else append
+            const existing = window.parent.document.querySelector('meta[name="viewport"]');
+            if (existing) {
+                existing.content = meta.content;
+            } else {
+                window.parent.document.getElementsByTagName('head')[0].appendChild(meta);
+            }
+
             const _backupWarn = console.warn;
             const _backupError = console.error;
             
-            const filterPattern = /Unrecognized feature|ambient-light-sensor|battery|document-domain|layout-animations|legacy-image-formats|oversized-images|vr|wake-lock|allow-scripts|allow-same-origin|escape its sandboxing|Invalid color|theme\.sidebar|widgetBackground/i;
+            const filterPattern = /Unrecognized feature|ambient-light-sensor|battery|document-domain|layout-animations|legacy-image-formats|oversized-images|vr|wake-lock|allow-scripts|allow-same-origin|escape its sandboxing|Invalid color|theme\\.sidebar|widgetBackground/i;
             
             console.warn = function(...args) {
                 const msg = (args[0] || '').toString();
@@ -344,52 +462,28 @@ def setup_styles():
                 if (filterPattern.test(msg)) return;
                 _backupError.apply(console, args);
             };
+
+            // 📱 SIDEBAR BUTTON PERMANENCE (No-Hover Fix)
+            const ensureUI = () => {
+                try {
+                    const doc = window.parent.document;
+                    // Neutralize the background overlay that closes the sidebar on random taps
+                    const overlayers = doc.querySelectorAll('[data-testid="stSidebar"] + div');
+                    overlayers.forEach(ov => {
+                        if (!ov.id && !ov.classList.contains('stMain')) {
+                             ov.style.pointerEvents = 'none';
+                             ov.style.opacity = '0';
+                        }
+                    });
+                } catch(e) {}
+            };
+            
+            setInterval(ensureUI, 500); 
+            window.parent.addEventListener('mouseup', ensureUI);
+            window.parent.addEventListener('touchend', ensureUI);
         })();
         </script>
     """, unsafe_allow_html=True)
-
-    # # Mobile: Aggressive sidebar protection
-    # st.markdown("""
-    # <script>
-    # (function() {
-    #     if (window.innerWidth > 1024) return; // Desktop - skip
-        
-    #     let allowClose = false;
-        
-    #     // Detect when user EXPLICITLY clicks the toggle button to close
-    #     parent.document.addEventListener('mousedown', (e) => {
-    #         const toggleBtn = e.target.closest('[data-testid="stSidebarCollapseButton"]');
-    #         if (toggleBtn) {
-    #             const sidebar = parent.document.querySelector('[data-testid="stSidebar"]');
-    #             if (sidebar) {
-    #                 const isCurrentlyOpen = sidebar.getBoundingClientRect().width > 50;
-    #                 // If sidebar is open and user clicks toggle, they want to close it
-    #                 if (isCurrentlyOpen) {
-    #                     allowClose = true;
-    #                     setTimeout(() => { allowClose = false; }, 500);
-    #                 }
-    #             }
-    #         }
-    
-    #     }, true);
-        
-    #     // AGGRESSIVE: Monitor every 50ms and force reopen unless user explicitly closed
-    #     setInterval(() => {
-    #         if (allowClose) return;
-            
-    #         const sidebar = parent.document.querySelector('[data-testid="stSidebar"]');
-    #         const toggleBtn = parent.document.querySelector('header [data-testid="stSidebarCollapseButton"]');
-            
-    #         if (sidebar && toggleBtn) {
-    #             const isOpen = sidebar.getBoundingClientRect().width > 50;
-    #             if (!isOpen) {
-    #                 toggleBtn.click(); // Force reopen
-    #             }
-    #         }
-    #     }, 50); // Check every 50ms for instant response
-    # })();
-    # </script>
-    # """, unsafe_allow_html=True)
 
 
 # --- FRAGMENTS ---
@@ -426,35 +520,8 @@ def render_zoom_controls(key_suffix="", context_class=""):
     if context_class:
         st.markdown(f'<div class="{context_class}">', unsafe_allow_html=True)
 
-    z_col2, z_col3, z_col4 = st.columns([1, 1, 1])
-    
-    def update_zoom(delta):
-        st.session_state["zoom_level"] = max(1.0, min(4.0, st.session_state["zoom_level"] + delta))
-        st.session_state["render_id"] += 1
-        st.session_state["canvas_id"] = st.session_state.get("canvas_id", 0) + 1
-    
-    with z_col2:
-        if st.button("➖", help="Zoom Out", use_container_width=True, key=f"zoom_out_{key_suffix}"):
-            update_zoom(-0.2)
-            st.rerun()
-            
-    with z_col3:
-        st.markdown(
-            f"""
-            <div class="{context_class}" style='text-align: center; font-weight: bold; background-color: #f0f2f6; color: #31333F; padding: 6px 10px; border-radius: 4px; border: 1px solid #dcdcdc;'>
-                {int(st.session_state.get('zoom_level', 1.0) * 100)}%
-            </div>
-            """, 
-            unsafe_allow_html=True
-        )
-            
-    with z_col4:
-        if st.button("➕", help="Zoom In", use_container_width=True, key=f"zoom_in_{key_suffix}"):
-            update_zoom(0.2)
-            st.rerun()
-
+    # Simplified Zoom: Removed manual +/- buttons, pinch to zoom is preferred.
     if st.session_state.get("zoom_level", 1.0) > 1.0 or st.session_state.get("pan_x", 0.5) != 0.5 or st.session_state.get("pan_y", 0.5) != 0.5:
-        st.markdown("<div style='height: 5px'></div>", unsafe_allow_html=True)
         if st.button("🎯 Reset View", use_container_width=True, key=f"reset_view_{key_suffix}"):
             st.session_state["zoom_level"] = 1.0
             st.session_state["pan_x"] = 0.5
@@ -617,7 +684,8 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                     # Validate size
                     if abs(final_box[2] - final_box[0]) > 5 and abs(final_box[3] - final_box[1]) > 5:
                         if not getattr(sam, "is_image_set", False): 
-                            sam.set_image(st.session_state["image"])
+                            with st.spinner("🧠 AI is analyzing image..."):
+                                sam.set_image(st.session_state["image"])
                             
                         mask = sam.generate_mask(
                             box_coords=final_box, 
@@ -735,7 +803,7 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
         p_box = st.session_state.get("pending_box_coords", None)
         p_box_json = str(p_box) if p_box else "null"
         
-        js_config = f"<script>const cfg={{ CANVAS_WIDTH: {display_width}, CANVAS_HEIGHT: {display_height}, CUR_PAN_X: {st.session_state['pan_x']}, CUR_PAN_Y: {st.session_state['pan_y']}, VIEW_W: {view_w}, IMAGE_W: {w}, VIEW_H: {view_h}, IMAGE_H: {h}, DRAWING_MODE: '{drawing_mode}', PENDING_BOX: {p_box_json} }}; window.CANVAS_CONFIG=cfg; if(window.parent) window.parent.CANVAS_CONFIG=cfg;</script><script>{js_template}</script>"
+        js_config = f"<script>const cfg={{ CANVAS_WIDTH: {display_width}, CANVAS_HEIGHT: {display_height}, CUR_PAN_X: {st.session_state['pan_x']}, CUR_PAN_Y: {st.session_state['pan_y']}, ZOOM_LEVEL: {st.session_state.get('zoom_level', 1.0)}, VIEW_W: {view_w}, IMAGE_W: {w}, VIEW_H: {view_h}, IMAGE_H: {h}, DRAWING_MODE: '{drawing_mode}', PENDING_BOX: {p_box_json} }}; window.CANVAS_CONFIG=cfg; if(window.parent) window.parent.CANVAS_CONFIG=cfg;</script><script>{js_template}</script>"
         components.html(js_config, height=0)
 
     # 🔄 SYNC & PROCESS (Silent)
@@ -770,7 +838,14 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                         if click_key != st.session_state.get("last_click_global"):
                             st.session_state["last_click_global"] = click_key
                             if not getattr(sam, "is_image_set", False): sam.set_image(st.session_state["image"])
-                            mask = sam.generate_mask(point_coords=[real_x, real_y], level=st.session_state.get("mask_level", 0), is_wall_only=st.session_state.get("is_wall_only", False))
+                            current_tool = st.session_state.get("selection_tool", "")
+                            is_wall_click_mode = "Wall Click" in current_tool
+                            mask = sam.generate_mask(
+                                point_coords=[real_x, real_y], 
+                                level=st.session_state.get("mask_level", 0), 
+                                is_wall_only=st.session_state.get("is_wall_only", False),
+                                is_wall_click=is_wall_click_mode
+                            )
                             if mask is not None:
                                 st.session_state["pending_selection"] = {'mask': mask, 'point': (real_x, real_y)}
                                 # ⚡ SMOOTH APPLY: Don't increment canvas_id to prevent flicker, silent mode
@@ -811,10 +886,13 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                                     if (box[2]-box[0]) > 5 and (box[3]-box[1]) > 5:
                                         if not getattr(sam, "is_image_set", False): 
                                             sam.set_image(st.session_state["image"])
+                                        current_tool = st.session_state.get("selection_tool", "")
+                                        is_wall_click_mode = "Wall Click" in current_tool
                                         mask = sam.generate_mask(
                                             box_coords=box, 
                                             level=st.session_state.get("mask_level", 0), 
-                                            is_wall_only=st.session_state.get("is_wall_only", False)
+                                            is_wall_only=st.session_state.get("is_wall_only", False),
+                                            is_wall_click=is_wall_click_mode
                                         )
                                     else:
                                         mask = np.zeros((h, w), dtype=bool)
@@ -1118,7 +1196,10 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                     with b_col1: 
                         if st.button("✨ APPLY", use_container_width=True, key="frag_apply", type="primary"):
                             cb_apply_pending(); safe_rerun() # Fragment scope default
-                    with b_col2: st.color_picker("Color", st.session_state.get("picked_color", "#8FBC8F"), label_visibility="collapsed", key="frag_pending_color")
+                    with b_col2: 
+                        new_chosen = st.color_picker("Color", st.session_state.get("picked_color", "#8FBC8F"), label_visibility="collapsed", key="frag_pending_color")
+                        if new_chosen != st.session_state.get("picked_color"):
+                            st.session_state["picked_color"] = new_chosen
                     with b_col3: 
                         if st.button("🗑️ CANCEL", use_container_width=True, key="frag_cancel"):
                             cb_cancel_pending(); safe_rerun() # Fragment scope default
@@ -1187,7 +1268,7 @@ def render_visualizer_engine_v11(display_width):
         st.divider()
 
     # 3. THE CANVAS (Isolated fragment)
-    if "AI Click" in tool_mode: drawing_mode = "point"
+    if "AI Click" in tool_mode or "Wall Click" in tool_mode: drawing_mode = "point"
     elif "AI Object" in tool_mode: drawing_mode = "rect" if st.session_state.get("ai_drag_sub_tool") == "🆕 Draw New" else "transform"
     elif "Lasso" in tool_mode and "Polygonal" not in tool_mode: drawing_mode = "freedraw"
     elif "Paint Brush" in tool_mode or "Eraser" in tool_mode: drawing_mode = "freedraw"
@@ -1221,25 +1302,41 @@ def render_sidebar(sam, device_str):
         # --- Native Sidebar Logic handles close ---
         pass
 
-        st.markdown("<h3 style='margin:0 0 15px 35px; padding:0; color:#31333F;'>Visualizer Studio</h3>", unsafe_allow_html=True)
+        st.markdown("""
+            <div style='display:flex; align-items:center; gap:8px; margin-bottom: 10px; padding-bottom: 5px; border-bottom: 1px solid #eee;'>
+                <div style='background: #FF4B4B; width: 28px; height: 28px; border-radius: 6px; display:flex; align-items:center; justify-content:center; color:white; font-size:16px;'>🖌️</div>
+                <h3 style='margin:0; padding:0; color:#1f2937; font-size: 1rem; font-weight: 700;'>Visualizer Studio</h3>
+            </div>
+        """, unsafe_allow_html=True)
         
-        if st.session_state.get("image") is not None:
-            if st.button("🔄 Reset Project / Clear All", use_container_width=True):
-                st.session_state["image"] = None
-                st.session_state["image_path"] = None
-                st.session_state["masks"] = []
-                for k in list(st.session_state.keys()):
-                    if any(k.startswith(p) for p in ["bg_url_cache_", "base_l_", "comp_cache_"]):
-                        del st.session_state[k]
-                st.session_state["render_cache"] = None
-                st.session_state["composited_cache"] = None
-                st.cache_data.clear()
-                st.session_state["uploader_id"] += 1 
-                safe_rerun()
-            st.divider()
+        # Reset button removed as per user request (Option 1)
+
+        if "uploader_id" not in st.session_state:
+            st.session_state["uploader_id"] = 0
 
         uploader_key = f"uploader_{st.session_state.get('uploader_id', 0)}"
-        uploaded_file = st.file_uploader("Start Project", type=["jpg", "png", "jpeg"], label_visibility="collapsed", key=uploader_key)
+        
+        # HIDE UPLOADER IF IMAGE EXISTS (Expanded=False)
+        is_image_loaded = st.session_state.get("image") is not None
+        expander_label = "📂 Change Image" if is_image_loaded else "📂 Upload Image"
+        
+        with st.expander(expander_label, expanded=not is_image_loaded):
+             uploaded_file = st.file_uploader("Start Project", type=["jpg", "png", "jpeg", "webp", "bmp", "tiff"], label_visibility="collapsed", key=uploader_key)
+             
+             # RESET BUTTON NOW INSIDE EXPANDER
+             if is_image_loaded:
+                  if st.button("️ Reset Project / Clear All", use_container_width=True):
+                    st.session_state["image"] = None
+                    st.session_state["image_path"] = None
+                    st.session_state["masks"] = []
+                    for k in list(st.session_state.keys()):
+                        if any(k.startswith(p) for p in ["bg_url_cache_", "base_l_", "comp_cache_"]):
+                            del st.session_state[k]
+                    st.session_state["render_cache"] = None
+                    st.session_state["composited_cache"] = None
+                    st.cache_data.clear()
+                    st.session_state["uploader_id"] += 1 
+                    safe_rerun()
         
         if uploaded_file is not None:
             file_key = getattr(uploaded_file, "file_id", f"{uploaded_file.name}_{uploaded_file.size}")
@@ -1249,7 +1346,8 @@ def render_sidebar(sam, device_str):
                 file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
                 image = cv2.cvtColor(cv2.imdecode(file_bytes, 1), cv2.COLOR_BGR2RGB)
                 st.session_state["image_original"] = image.copy()
-                max_dim = 1100
+                from config.constants import PerformanceConfig
+                max_dim = PerformanceConfig.MAX_IMAGE_DIMENSION
                 h, w = image.shape[:2]
                 if max(h, w) > max_dim:
                     scale = max_dim / max(h, w)
@@ -1266,26 +1364,23 @@ def render_sidebar(sam, device_str):
                 st.session_state["render_id"] = 0
                 st.session_state["canvas_id"] = st.session_state.get("canvas_id", 0) + 1
                 
-                # Clear all technical caches
-                for k in ["global_base_lab", "lab_cache_id", "lab_cache_dim", "render_cache", "composited_cache"]:
-                    if k in st.session_state:
-                         del st.session_state[k]
+                # 🧹 Targeted cache cleanup (faster than global clear)
+                cleanup_session_caches(aggressive=True)
                 
-                for k in list(st.session_state.keys()):
-                    if any(k.startswith(p) for p in ["bg_url_cache_", "base_l_", "comp_cache_"]):
-                        del st.session_state[k]
+                # 🚀 PERFORMANCE FIX: We removed sam.set_image(image) here.
+                # The engine will now be primed asynchronously on the first tool interaction.
+                # This eliminates the "Running..." freeze after uploading an image.
                 
-                st.cache_data.clear()
-                # 🧠 Prime the engine immediately
-                try:
-                    sam.set_image(image)
-                except:
-                    pass
-                st.rerun() 
+                st.rerun()
+        
+        # Auto-reset logic REMOVED to prevent accidental clearing during reruns.
+        # Users must use the "Reset Project / Clear All" button inside the expander.
+        elif uploaded_file is None and st.session_state.get("image") is not None:
+            pass 
 
         if st.session_state.get("image") is None:
              st.markdown("<div style='background:#f3f4f6; padding:15px; border-radius:10px; border:1px dashed #d1d5db; margin:10px 0;'><p style='margin:0; font-size:0.85rem; color:#4b5563; line-height:1.4;'><b>Ready to paint?</b><br>Upload a photo of your wall or room to begin.</p></div>", unsafe_allow_html=True)
-             st.caption("Supported formats: JPG, PNG, JPEG")
+             st.caption("Supported: JPG, PNG, JPEG, WEBP, BMP, TIFF")
              return
 
         if st.session_state.get("image") is not None:
@@ -1335,45 +1430,38 @@ def render_sidebar(sam, device_str):
                     st.download_button(label="📥 Save Final Image", data=st.session_state["last_export"], file_name="pro_visualizer_design.png", mime="image/png", use_container_width=True)
             
             
-            st.divider()
-            st.subheader("🛠️ Selection Tool")
+            st.markdown('<div class="sidebar-header-text">🛠️ Selection Tool</div>', unsafe_allow_html=True)
             
             # Use standardized tool options
             tool_options = list(TOOL_MAPPING.values())
             current_tool = st.session_state.get("selection_tool", TOOL_MAPPING["👆"])
-            try:
-                tool_idx = tool_options.index(current_tool)
-            except ValueError:
-                tool_idx = 0
-
-            # Use index parameter directly - don't set via session state before widget creation
-            # This prevents Streamlit's "default value + Session State API" warning
             
-            radio_key = f"sidebar_tool_radio_{st.session_state.get('canvas_id', 0)}"
+            radio_key = "sidebar_tool_radio"
+            if radio_key not in st.session_state:
+                st.session_state[radio_key] = current_tool if current_tool in tool_options else tool_options[0]
+
             st.radio("Method", tool_options, 
-                                    index=tool_idx, 
-                                    horizontal=True, 
+                                    horizontal=False, 
                                     key=radio_key,
                                     on_change=cb_sidebar_tool_sync,
                                     args=(radio_key,))
             
-            # DEBUG TRACE
-            if "selection_tool" in st.session_state:
-                print(f"DEBUG: SIDEBAR RENDER -> Tool: {st.session_state['selection_tool']}, Radio Key: {radio_key}")
+            st.markdown('<div class="sidebar-divider"></div>', unsafe_allow_html=True)
             
-            # 🎯 HIDE OPERATION FOR BRUSH/ERASER - REPLACED: Now available for all tools
+            if "sidebar_op_radio" not in st.session_state:
+                st.session_state["sidebar_op_radio"] = st.session_state.get("selection_op", "Add")
+                
             st.radio("Operation", ["Add", "Subtract"], 
                                     horizontal=True, 
-                                    index=0 if st.session_state.get("selection_op") == "Add" else 1,
                                     key="sidebar_op_radio",
                                     on_change=cb_sidebar_op_sync)
+            st.markdown('<div class="sidebar-divider"></div>', unsafe_allow_html=True)
             
-            # --- Tool Specific Controls (Full Width) ---
             # --- Tool Specific Controls (Full Width) ---
             # 🎯 HIDE LAYER SCOPE FOR POLYGONAL LASSO AND FREEHAND LASSO AND AI OBJECT (As Requested)
             # Only show scope for AI Click (Point)
             if "AI Click" in current_tool:
-                st.caption("Layer Scope:")
+                st.markdown('<div class="sidebar-header-text">🎯 Layer Scope</div>', unsafe_allow_html=True)
                 prec_options = ["Standard Walls", "Small Details", "Whole Object"]
                 current_idx = min(st.session_state.get("mask_level", 0), 2)
                 prec_mode = st.radio("Segmentation Mode", prec_options, index=current_idx, key="sidebar_prec_mode_radio", label_visibility="collapsed")
@@ -1383,16 +1471,21 @@ def render_sidebar(sam, device_str):
                     safe_rerun()
                 # ⚡ Always Instant Apply
                 st.session_state["ai_click_instant_apply"] = True
+                st.markdown('<div class="sidebar-divider"></div>', unsafe_allow_html=True)
             
             # --- 🎨 BRUSH & ERASER CONTROLS ---
             elif "Paint Brush" in current_tool or "Eraser" in current_tool:
+                st.markdown('<div class="sidebar-header-text">🖌️ Brush Settings</div>', unsafe_allow_html=True)
                 st.slider("Brush Size", 5, 200, 40, key="lasso_thickness", help="Adjust the thickness of your brush.")
                 st.caption("Draw freely on the image.")
+                st.markdown('<div class="sidebar-divider"></div>', unsafe_allow_html=True)
             
             # --- 🪄 MAGIC WAND CONTROLS ---
             elif "Magic Wand" in current_tool:
-                st.session_state["wand_tolerance"] = 25
-                st.caption("Click internally on a wall to fill it.")
+                st.markdown('<div class="sidebar-header-text">🪄 Wand Settings</div>', unsafe_allow_html=True)
+                st.slider("Wand Tolerance", 1, 100, 25, key="wand_tolerance", help="Higher values include more similar colors.")
+                st.caption("Click on a colored area to flood-fill it.")
+                st.markdown('</div>', unsafe_allow_html=True)
 
             # 🎯 HIDE ACTION OPTIONS FOR AI OBJECT (BOX)
             # Force "Draw New" mode silently if AI Object is selected, but do not show the UI.
@@ -1458,24 +1551,25 @@ def render_sidebar(sam, device_str):
                     st.slider("Selection Visibility", 0.1, 1.0, 0.5, key="selection_highlight_opacity")
                     # Edge Feathering (applied before final apply)
                     st.slider("Edge Softness", 0, 5, 0, key="selection_softness", help="Feather the edges of the selection before applying paint.")
+                    # Mask Expansion/Contraction
+                    st.slider("Edge Refinement (Expand/Contract)", -10, 10, 0, key="selection_refinement", help="Fine-tune the mask boundary. Negative shrinks it, Positive grows it.")
                     # Finish Selection
                     st.radio("Paint Finish", ["Standard", "Matte", "Satin", "Gloss", "Texture"], horizontal=True, key="selection_finish")
+                st.markdown('<div class="sidebar-divider"></div>', unsafe_allow_html=True)
             
-            st.divider()
-            st.subheader("👁️ View Settings")
+            st.markdown('<div class="sidebar-header-text">👁️ View Settings</div>', unsafe_allow_html=True)
             st.toggle("Compare Before/After", key="show_comparison")
+            st.markdown('<div class="sidebar-divider"></div>', unsafe_allow_html=True)
 
-            # Render Desktop Zoom Controls (Hidden on Mobile)
-            # render_zoom_controls(key_suffix="sidebar", context_class="desktop-zoom-wrapper")
-            st.divider()
             sidebar_paint_fragment()
-            st.divider()
+            st.markdown('<div class="sidebar-divider"></div>', unsafe_allow_html=True)
+            st.markdown('<div class="sidebar-header-text">📚 Activity Layers</div>', unsafe_allow_html=True)
             if st.session_state["masks"] or st.session_state.get("masks_redo"):
                 col_u1, col_u2, col_u3 = st.columns(3)
                 with col_u1: st.button("⏪ Undo", use_container_width=True, on_click=cb_undo, key="sidebar_undo", disabled=not st.session_state["masks"])
                 with col_u2: st.button("⏩ Redo", use_container_width=True, on_click=cb_redo, key="sidebar_redo", disabled=not st.session_state.get("masks_redo"))
                 with col_u3: st.button("🗑️ Clear", use_container_width=True, on_click=cb_clear_all, key="sidebar_clear")
-                st.write("---")
+                # Removed height spacer
                 for i in range(len(st.session_state["masks"]) - 1, -1, -1):
                     mask_data = st.session_state["masks"][i]
                     with st.container(border=True):
@@ -1486,14 +1580,9 @@ def render_sidebar(sam, device_str):
                         with r2: st.markdown(f"<div style='width:24px;height:24px;background:{cur_c};border-radius:4px;border:1px solid #ddd;'></div>", unsafe_allow_html=True)
                         with r3: st.markdown(f"`{cur_c}`")
                         with r4: st.button("🗑️", key=f"sidebar_del_{i}", on_click=cb_delete_layer, args=(i,))
-                        
-                        # Real-time Refinement Slider
-                        # HIDDEN: User requested to hide refinement (Step 2281)
-                        # new_ref = st.slider("Expansion / Contraction", -10, 10, int(mask_data.get('refinement', 0)), key=f"refine_{i}")
-                        # if new_ref != mask_data.get('refinement'):
-                        #     mask_data['refinement'] = new_ref
-                        #     st.session_state["render_id"] += 1
-            else: st.caption("No active layers.")
+            else: 
+                st.caption("No active layers.")
+                st.info("Paint something to see layers here!")
 
 
 def render_comparison_slider():

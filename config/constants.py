@@ -14,17 +14,14 @@ class SegmentationConfig:
     
     # Base color tolerance for standard walls (can decay with distance)
     # Allows paint to flow over subtle color variations
-    COLOR_DIFF_STANDARD_WALL = 65
+    COLOR_DIFF_STANDARD_WALL = 115
     
     # Tolerance for box selection mode (more relaxed)
-    COLOR_DIFF_BOX_MODE = 90
+    COLOR_DIFF_BOX_MODE = 100
     
-    # --- Wall Mode Refinements ---
-    # Stricter color matching for wall-priority mode
-    # Original balanced value: 45 - prevents bleeding while filling walls properly
-    COLOR_DIFF_WALL_MODE = 55
+    COLOR_DIFF_WALL_MODE = 95
     # Original edge detection: 30 - balanced edge detection
-    EDGE_THRESHOLD_WALL_MODE = 30
+    EDGE_THRESHOLD_WALL_MODE = 10
     
     # --- Intelligent Object Detection (for auto mask selection) ---
     # Thresholds to detect doors/windows vs walls in Standard Walls mode
@@ -44,10 +41,10 @@ class SegmentationConfig:
     EDGE_THRESHOLD_SMALL_OBJECT = 20
     
     # Edge threshold for standard walls
-    EDGE_THRESHOLD_STANDARD_WALL = 30
+    EDGE_THRESHOLD_STANDARD_WALL = 35
     
     # Edge threshold for box mode
-    EDGE_THRESHOLD_BOX_MODE = 35
+    EDGE_THRESHOLD_BOX_MODE = 15
     
     # --- Size Thresholds ---
     # Minimum mask size in pixels to be considered valid
@@ -61,10 +58,11 @@ class SegmentationConfig:
     
     # --- Distance Decay Parameters ---
     # Maximum distance (pixels) before tolerance starts decaying
-    DECAY_DISTANCE_MAX = 400.0
+    # OPTIMIZED: Effectively disabled for standard rooms to ensure full coverage.
+    DECAY_DISTANCE_MAX = 3000.0
     
-    # Minimum decay factor (tolerance won't go below 45% of base)
-    DECAY_FACTOR_MIN = 0.45
+    # Minimum decay factor (tolerance won't go below 80% of base)
+    DECAY_FACTOR_MIN = 0.80
     
     # --- Morphological Operations ---
     # Kernel size for morphological operations
@@ -84,11 +82,11 @@ class SegmentationConfig:
     CONNECTED_COMPONENTS_CONNECTIVITY = 8
     
     # --- Component Filtering (to prevent small object leaks) ---
-    # Minimum component size as ratio of clicked component (0.1 = 10%)
-    MIN_COMPONENT_RATIO = 0.1
+    # Minimum component size as ratio of clicked component (0.15 = 15%)
+    MIN_COMPONENT_RATIO = 0.15
     
     # Max distance allowed from click for disconnected pieces (pixels)
-    MAX_COMPONENT_DISTANCE = 150
+    MAX_COMPONENT_DISTANCE = 250
 
 
 class AdaptiveProcessingConfig:
@@ -216,7 +214,8 @@ class PerformanceConfig:
     
     # --- Image Processing ---
     # Maximum image dimension for processing (larger images are resized)
-    MAX_IMAGE_DIMENSION = 1100
+    # OPTIMIZATION: Reduced from 1100 to 800 to match canvas width and speed up MobileSAM 
+    MAX_IMAGE_DIMENSION = 800
     
     # JPEG quality for background image encoding (1-100)
     # Lower = smaller payload, faster loading, but lower quality
@@ -244,7 +243,9 @@ class PerformanceConfig:
     SAM_CHECKPOINT_PATH = "weights/mobile_sam.pt"
     
     # Cache version (increment to invalidate caches)
-    CACHE_VERSION = "V1.1.2-FORCE-REL"
+    # Cache version (increment to invalidate caches)
+    # Cache version (increment to invalidate caches)
+    CACHE_VERSION = "V1.7.0-TEXTURE-ARMOR-FIX"
 
 
 # --- Export Convenience Constants ---

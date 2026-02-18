@@ -9,6 +9,7 @@
             if (!w || !w.console) return;
             ['warn', 'error', 'log'].forEach(m => {
                 const original = w.console[m];
+
                 if (!original || original.__isMuted) return;
                 w.console[m] = function (...args) {
                     const msg = String(args[0] || "");
@@ -20,6 +21,33 @@
         } catch (e) { }
     };
     silence(window);
+
+    // 📱 ADVANCED GESTURE TRACKING
+    window.isCanvasGesturing = false;
+    window.lastPinchTime = 0;
+    window.activePointers = new Map();
+
+    // 🛡️ SUPER-STRICT GESTURE INTERCEPTOR (Parent Level)
+    // We catch touchstart on the parent to block iframe click logic immediately
+    try {
+        window.parent.document.addEventListener('touchstart', e => {
+            if (e.touches.length > 1) {
+                window.isCanvasGesturing = true;
+            }
+        }, { capture: true, passive: true });
+    } catch (e) { }
+
+    // Global tracker for strict multi-touch rules
+    window.parent.document.addEventListener('pointerdown', e => window.activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY }), true);
+    window.parent.document.addEventListener('pointerup', e => window.activePointers.delete(e.pointerId), true);
+    window.parent.document.addEventListener('pointercancel', e => window.activePointers.delete(e.pointerId), true);
+
+    // Internal tracker for the overlay itself (fallback)
+    const trackPointer = (el) => {
+        el.addEventListener('pointerdown', e => window.activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY }));
+        el.addEventListener('pointerup', e => window.activePointers.delete(e.pointerId));
+        el.addEventListener('pointercancel', e => window.activePointers.delete(e.pointerId));
+    };
 
     // Config Check
     let config = window.CANVAS_CONFIG || (window.parent ? window.parent.CANVAS_CONFIG : null);
@@ -103,7 +131,7 @@
                 position: 'absolute',
                 top: '0', left: '0', width: '100%', height: '100%',
                 zIndex: '999',
-                touchAction: 'none',
+                touchAction: 'pan-y', // 📱 Allow vertical scrolling
                 display: 'none',
                 cursor: 'crosshair',
                 overflow: 'visible'
@@ -212,10 +240,11 @@
         }
 
         bindEvents() {
+            trackPointer(this.overlay);
             this.overlay.onpointerdown = this.onPointerDown.bind(this);
             this.overlay.onpointermove = this.onPointerMove.bind(this);
             this.overlay.onpointerup = this.onPointerUp.bind(this);
-            this.overlay.onpointercancel = this.onPointerUp.bind(this);
+            this.overlay.onpointercancel = this.onPointerUp.bind(this); // Reset on scroll
         }
 
         checkMode() {
@@ -279,7 +308,14 @@
         }
 
         onPointerDown(e) {
-            e.preventDefault();
+            // 🛡️ STRICT GESTURE GUARD
+            const touchCount = e.pointerType === 'touch' ? window.activePointers.size : 0;
+            if (window.isCanvasGesturing || touchCount > 1 || (Date.now() - window.lastPinchTime < 600)) {
+                this.cancelDrawing();
+                return;
+            }
+
+            // DO NOT preventDefault here to allow scroll detection
             this.overlay.setPointerCapture(e.pointerId);
 
             const rect = this.overlay.getBoundingClientRect();
@@ -329,6 +365,11 @@
         }
 
         onPointerMove(e) {
+            const touchCount = e.pointerType === 'touch' ? window.activePointers.size : 0;
+            if (window.isCanvasGesturing || touchCount > 1) {
+                this.cancelDrawing();
+                return;
+            }
             if (!this.isDrawing && !this.isMoving && !this.activeHandle) return;
             e.preventDefault();
 
@@ -390,6 +431,17 @@
             }
 
             requestAnimationFrame(() => this.updateDOM());
+        }
+
+        cancelDrawing() {
+            if (this.isDrawing) {
+                this.boxes.pop();
+                this.isDrawing = false;
+                this.selectedIndex = -1;
+                this.updateDOM();
+            }
+            this.isMoving = false;
+            this.activeHandle = null;
         }
 
         onPointerUp(e) {
@@ -498,8 +550,12 @@
         }
 
         bindEvents() {
+            trackPointer(this.overlay);
             // Use pointer events for unified mouse/touch
             this.overlay.onpointerdown = this.onPointerDown.bind(this);
+            this.overlay.onpointermove = this.onPointerMove.bind(this);
+            this.overlay.onpointerup = this.onPointerUp.bind(this);
+            this.overlay.onpointercancel = (e) => this.onPointerUp(e); // Reset on scroll
             // Double click to close
             this.overlay.ondblclick = this.onDoubleClick.bind(this);
         }
@@ -520,7 +576,11 @@
         }
 
         onPointerDown(e) {
-            e.preventDefault();
+            // 🛡️ STRICT GESTURE GUARD
+            const touchCount = e.pointerType === 'touch' ? window.activePointers.size : 0;
+            if (window.isCanvasGesturing || touchCount > 1 || (Date.now() - (window.lastPinchTime || 0) < 600)) return;
+
+            // e.preventDefault(); // Removed to allow scroll
             e.stopPropagation();
 
             if (this.isClosed) return;
@@ -684,7 +744,10 @@
         }
 
         bindEvents() {
+            trackPointer(this.overlay);
             this.overlay.onpointerdown = this.onPointerDown.bind(this);
+            this.overlay.onpointerup = this.onPointerUp.bind(this);
+            this.overlay.onpointercancel = (e) => { this.potentialX = null; };
         }
 
         checkMode() {
@@ -699,20 +762,39 @@
         }
 
         onPointerDown(e) {
-            e.preventDefault();
+            // 🛡️ STRICT GESTURE GUARD
+            const touchCount = e.pointerType === 'touch' ? window.activePointers.size : 0;
+            if (window.isCanvasGesturing || touchCount > 1 || (Date.now() - (window.lastPinchTime || 0) < 600)) {
+                this.potentialX = null;
+                return;
+            }
+
+            // e.preventDefault(); // Removed to allow scroll
             e.stopPropagation();
 
+            const rect = this.overlay.getBoundingClientRect();
+            // Store potential tap position
+            this.potentialX = e.clientX;
+            this.potentialY = e.clientY;
+            this.potentialTime = Date.now();
+        }
+
+        onPointerUp(e) {
+            if (!this.potentialX || window.isCanvasGesturing || window.activePointers.size > 0) {
+                this.potentialX = null;
+                return;
+            }
+
             const now = Date.now();
-            if (now - this.lastTapTime < 300) return; // Debounce
-            this.lastTapTime = now;
+            if (now - this.potentialTime > 500) return; // Not a tap
 
             const rect = this.overlay.getBoundingClientRect();
             const scale = (window.CANVAS_CONFIG?.CANVAS_WIDTH || 800) / rect.width;
 
-            const x = Math.round((e.clientX - rect.left) * scale);
-            const y = Math.round((e.clientY - rect.top) * scale);
+            const x = Math.round((this.potentialX - rect.left) * scale);
+            const y = Math.round((this.potentialY - rect.top) * scale);
 
-            console.log(`JS: Point tap at (${x}, ${y}) [Screen: ${Math.round(e.clientX - rect.left)}, ${Math.round(e.clientY - rect.top)}, Scale: ${scale.toFixed(2)}]`);
+            console.log(`JS: Point tap at (${x}, ${y})`);
 
             // Set URL parameter for Streamlit backend
             const url = new URL(parent.location.href);
@@ -720,7 +802,128 @@
             url.searchParams.delete('box');
             url.searchParams.delete('poly_pts');
 
-            // Trigger rerun immediately
+            // Trigger rerun
+            if (throttledReplaceState(url)) {
+                triggerRerun();
+            }
+            this.potentialX = null;
+        }
+    }
+    class MultiTouchHandler {
+        constructor() {
+            this.lastUpdate = 0;
+            this.initialDist = 0;
+            this.initialZoom = 1.0;
+            this.initialPan = { x: 0.5, y: 0.5 };
+            this.initialMid = { x: 0, y: 0 };
+            this.isGesturing = false;
+            this.targetEl = null;
+            this._lastSyncedZ = 1.0;
+            this._lastSyncedX = 0.5;
+            this._lastSyncedY = 0.5;
+        }
+
+        attach(el) {
+            this.targetEl = el;
+            el.addEventListener('touchstart', (e) => {
+                if (e.touches.length === 2) {
+                    e.preventDefault(); // 🛑 BLOCK BROWSER ZOOM START
+                    const t1 = e.touches[0], t2 = e.touches[1];
+                    this.initialDist = Math.hypot(t1.pageX - t2.pageX, t1.pageY - t2.pageY);
+                    this.initialMid = { x: (t1.pageX + t2.pageX) / 2, y: (t1.pageY + t2.pageY) / 2 };
+                    this.initialZoom = config.ZOOM_LEVEL || 1.0;
+                    this.initialPan = { x: config.CUR_PAN_X || 0.5, y: config.CUR_PAN_Y || 0.5 };
+                    this.isGesturing = true;
+                    window.isCanvasGesturing = true;
+
+                    this._lastSyncedZ = this.initialZoom;
+                    this._lastSyncedX = this.initialPan.x;
+                    this._lastSyncedY = this.initialPan.y;
+
+                    // PREVIEW START: Target the wrapper but apply transform to IFRAME for smoothness
+                    const iframe = getActiveIframe();
+                    if (iframe) {
+                        iframe.style.transition = 'none'; // Disable transitions during gesture
+                    }
+                }
+            }, { passive: false });
+
+            el.addEventListener('touchmove', (e) => {
+                if (this.isGesturing && e.touches.length === 2) {
+                    e.preventDefault(); // 🛑 BLOCK BROWSER ZOOM MOVE
+                    const t1 = e.touches[0], t2 = e.touches[1];
+                    const dist = Math.hypot(t1.pageX - t2.pageX, t1.pageY - t2.pageY);
+                    const mid = { x: (t1.pageX + t2.pageX) / 2, y: (t1.pageY + t2.pageY) / 2 };
+
+                    const gestureScale = dist / this.initialDist;
+                    const newZoom = Math.max(1.0, Math.min(4.0, this.initialZoom * gestureScale));
+
+                    const dx_px = mid.x - this.initialMid.x;
+                    const dy_px = mid.y - this.initialMid.y;
+
+                    // Calculate Panning (normalized 0-1)
+                    const pan_sens = 1.0 / (config.ZOOM_LEVEL || 1.0);
+                    const newPanX = Math.max(0, Math.min(1, this.initialPan.x - (dx_px / CANVAS_WIDTH) * pan_sens));
+                    const newPanY = Math.max(0, Math.min(1, this.initialPan.y - (dy_px / CANVAS_HEIGHT) * pan_sens));
+
+                    this._lastSyncedZ = newZoom;
+                    this._lastSyncedX = newPanX;
+                    this._lastSyncedY = newPanY;
+
+                    // --- SMOOTH CSS PREVIEW ---
+                    const iframe = getActiveIframe();
+                    if (iframe) {
+                        const baseScale = Math.min(1.0, (parent.window.innerWidth - 20) / CANVAS_WIDTH);
+                        const visualScale = baseScale * gestureScale;
+                        const vdx = mid.x - this.initialMid.x;
+                        const vdy = mid.y - this.initialMid.y;
+                        iframe.style.transform = `translate(${vdx}px, ${vdy}px) scale(${visualScale})`;
+                    }
+
+                    // Throttled backend update (keep it slow to avoid UI lag)
+                    const now = Date.now();
+                    if (now - this.lastUpdate > 300) {
+                        this.sync(newZoom, newPanX, newPanY);
+                        this.lastUpdate = now;
+                    }
+                }
+            }, { passive: false });
+
+            el.addEventListener('touchend', (e) => {
+                if (this.isGesturing) {
+                    this.isGesturing = false;
+                    window.isCanvasGesturing = false;
+                    window.lastPinchTime = Date.now();
+                    this.commitFinal();
+                }
+            });
+        }
+
+        commitFinal() {
+            // Re-calculate the final values based on current position if possible, 
+            // but for simplicity we'll use the tracked visual values.
+            // (In a more complex app we'd calculate them precisely)
+
+            // For now, let's just trigger the sync with the last known values
+            // but we need to ensure they are updated.
+            // Since touchmove updates them, we jump to results.
+
+            const iframe = getActiveIframe();
+            if (iframe) {
+                iframe.style.transition = 'transform 0.3s ease-out';
+                // Note: triggerRerun will happen soon, which replaces the iframe, so transition is mostly for feel.
+            }
+
+            // Extract from URL or tracked state? tracked state is better.
+            if (this._lastSyncedZ) {
+                this.sync(this._lastSyncedZ, this._lastSyncedX, this._lastSyncedY);
+            }
+        }
+
+        sync(z, px, py) {
+            const url = new URL(parent.location.href);
+            url.searchParams.set('zoom_update', z.toFixed(2));
+            url.searchParams.set('pan_update', `${px.toFixed(3)},${py.toFixed(3)},${Date.now()}`);
             if (throttledReplaceState(url)) {
                 triggerRerun();
             }
@@ -730,12 +933,18 @@
     let boxEditor = new BoxEditor();
     let polyEditor = new PolygonEditor();
     let pointEditor = new PointEditor();
+    let multiTouch = new MultiTouchHandler();
 
     function mainLoop() {
         applyResponsiveScale();
-        boxEditor.checkMode();
-        polyEditor.checkMode();
-        pointEditor.checkMode();
+        const editors = [boxEditor, polyEditor, pointEditor];
+        editors.forEach(ed => {
+            ed.checkMode();
+            if (ed.overlay && !ed.overlay._gestureAttached) {
+                multiTouch.attach(ed.overlay);
+                ed.overlay._gestureAttached = true;
+            }
+        });
     }
 
     // Start

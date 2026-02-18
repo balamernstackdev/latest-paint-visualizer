@@ -177,17 +177,21 @@ class ColorTransferEngine:
     @staticmethod
     def composite_multiple_layers(image_rgb, masks_data):
         """
-        ULTRA-STABLE Single-Pass Compositor with Adaptive Processing.
+        ULTRA-STABLE Single-Pass Compositor with Smart Caching.
         
-        Prevents color shifting and jagged edges by avoiding repetitive conversions.
-        Now includes adaptive blur selection per-layer based on object characteristics.
+        Optimized to handle 'Add Layer' operations incrementally.
+        only re-calculates the new layer on top of the cached previous state.
         """
         if not masks_data:
             return image_rgb.copy()
 
-        # 1. Access/Create Base LAB Cache (from ORIGINAL image)
-        l_cache_key = "global_base_lab"
         h, w = image_rgb.shape[:2]
+        
+        # --- CACHING LOGIC ---
+        # We need to decide: Start from scratch OR Start from cached state?
+        
+        # 1. Access Base LAB (Always needed for L-channel reference)
+        l_cache_key = "global_base_lab"
         
         if (l_cache_key not in st.session_state or 
             st.session_state.get("lab_cache_id") != id(image_rgb) or
@@ -199,14 +203,59 @@ class ColorTransferEngine:
             st.session_state[l_cache_key] = (L, A, B)
             st.session_state["lab_cache_id"] = id(image_rgb)
             st.session_state["lab_cache_dim"] = (h, w)
+            
+            # Reset composite cache if base image changed
+            st.session_state["comp_cache_state"] = None
+            st.session_state["comp_cache_len"] = 0
+            st.session_state["comp_cache_last_id"] = None
         
-        L, base_A, base_B = st.session_state[l_cache_key]
+        # Load Base
+        base_L, base_A, base_B = st.session_state[l_cache_key]
         
-        # 2. Cumulative A/B Blending with Adaptive Blur
+        # 2. Check for Incremental Update
+        # An update is incremental if:
+        # a. We have a valid cache
+        # b. The new mask list is longer than the cached one
+        # c. The prefix of the new list matches the logic (we assume append-only if len > cache)
+        # d. The last layer we cached has the same object identity
+        
+        cached_state = st.session_state.get("comp_cache_state")
+        cached_len = st.session_state.get("comp_cache_len", 0)
+        
+        start_index = 0
         curr_A = base_A.copy()
         curr_B = base_B.copy()
+        # L must be mutable/copy for finishes that modify lightness
+        curr_L_mod = base_L.copy() 
 
-        for data in masks_data:
+        can_use_cache = False
+        
+        if cached_state is not None and len(masks_data) > cached_len:
+            # Verify consistency: Did we just append?
+            # We check the identity of the last item in the *cache's* range
+            if cached_len > 0:
+                last_cached_mask = masks_data[cached_len-1]
+                if id(last_cached_mask) == st.session_state.get("comp_cache_last_id"):
+                     can_use_cache = True
+            else:
+                can_use_cache = True # Cache was empty (0 layers), now we have >=1.
+        
+        if can_use_cache:
+            # Resume from cache!
+            # print(f"DEBUG: Smart Cache HIT! Rendering layers {cached_len} to {len(masks_data)}")
+            c_L, c_A, c_B = cached_state
+            curr_L_mod = c_L.copy()
+            curr_A = c_A.copy()
+            curr_B = c_B.copy()
+            start_index = cached_len
+        else:
+            # Full Re-render
+            # print("DEBUG: Smart Cache MISS. Rerendering all.")
+            pass
+
+        # 3. Cumulative A/B Blending
+        for i in range(start_index, len(masks_data)):
+            data = masks_data[i]
             mask = data['mask']
             color_hex = data.get('color')
             if not color_hex: continue
@@ -217,95 +266,62 @@ class ColorTransferEngine:
             
             target_a, target_b = ColorTransferEngine.get_target_ab(color_hex)
             
-            # Robust Mask Preparation
+            # Robust preparation
             if mask.shape[:2] != (h, w):
                 mask_uint8 = cv2.resize(mask.astype(np.uint8), (w, h), interpolation=cv2.INTER_NEAREST)
                 mask_f = mask_uint8.astype(np.float32)
             else:
                 mask_f = mask.astype(np.float32)
 
-            # Robust Normalization
-            if mask_f.max() > 1.0:
-                mask_f = mask_f / 255.0
+            if mask_f.max() > 1.0: mask_f /= 255.0
             
-            # LEGACY DILATION + BLUR (optimized for speed)
-            # Adaptive processing disabled by default to prevent freezing
-            use_legacy = True  # Force legacy for composite performance
-            
-            if False and ADAPTIVE_AVAILABLE:  # Disabled: too slow for multiple layers
-                try:
-                    # Get seed point if available
-                    seed_point = data.get('point')
-                    
-                    # Use adaptive blur based on edge density
-                    blur_kernel = get_adaptive_blur_kernel(mask, image_rgb)
-                    
-                    # Check if bilateral filtering needed (textured surfaces)
-                    use_bilateral = False
-                    if seed_point is not None:
-                        try:
-                            obj_type = classify_object(mask, image_rgb, seed_point)
-                            params = get_object_params(obj_type)
-                            use_bilateral = params['use_bilateral']
-                        except Exception:
-                            pass  # Fallback to standard blur
-                    
-                    # Apply appropriate blur
-                    if use_bilateral:
-                        mask_soft = apply_bilateral_blur(mask_f, preserve_edges=True)
-                    else:
-                        mask_soft = cv2.GaussianBlur(mask_f, blur_kernel, 0)
-                        
-                except Exception as e:
-                    # Fallback to fixed blur on error
-                    import logging
-                    logging.warning(f"Adaptive composite failed, using legacy: {e}")
-                    kernel = np.ones(ColorizerConfig.DILATION_KERNEL_SIZE, np.uint8)
-                    mask_dilated = cv2.dilate(mask_f, kernel, iterations=ColorizerConfig.DILATION_ITERATIONS)
-                    mask_soft = cv2.GaussianBlur(mask_dilated, ColorizerConfig.BLUR_KERNEL_SIZE, 0)
+            # BLUR / REFINEMENT
+            refinement = data.get('refinement', 0)
+            if refinement != 0:
+                k_size = abs(refinement) * 2 + 1
+                refine_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k_size, k_size))
+                if refinement > 0: mask_f = cv2.dilate(mask_f, refine_kernel)
+                else: mask_f = cv2.erode(mask_f, refine_kernel)
+
+            user_soft = data.get('softness', 0)
+            if user_soft > 0:
+                k_size = user_soft * 4 + 1
+                blur_val = (k_size, k_size)
             else:
-                # ENHANCED: Use layer-specific softness if provided
-                user_soft = data.get('softness', 0)
-                if user_soft > 0:
-                    k_size = user_soft * 4 + 1
-                    blur_val = (k_size, k_size)
-                else:
-                    blur_val = ColorizerConfig.BLUR_KERNEL_SIZE
-                
-                kernel = np.ones(ColorizerConfig.DILATION_KERNEL_SIZE, np.uint8)
-                mask_dilated = cv2.dilate(mask_f, kernel, iterations=ColorizerConfig.DILATION_ITERATIONS)
-                mask_soft = cv2.GaussianBlur(mask_dilated, blur_val, 0)
+                blur_val = ColorizerConfig.BLUR_KERNEL_SIZE
             
-            # --- FINISH BRAIN: Simple L-Channel Blend Adjustment ---
+            kernel = np.ones(ColorizerConfig.DILATION_KERNEL_SIZE, np.uint8)
+            mask_dilated = cv2.dilate(mask_f, kernel, iterations=ColorizerConfig.DILATION_ITERATIONS)
+            mask_soft = cv2.GaussianBlur(mask_dilated, blur_val, 0)
+            
+            # L-Channel Adjustment
             finish = data.get('finish', 'Standard')
             if finish != 'Standard':
-                layer_L = L.copy()
-                if finish == 'Matte':
-                    # Flat look: reduce contrast and slightly lighten darks
-                    layer_L = np.clip(L * 0.85 + 7, 0, 100)
-                elif finish == 'Gloss':
-                    # Reflective: increase contrast to emphasize highlights/shadows
-                    layer_L = np.clip((L - 50) * 1.35 + 50, 0, 100)
-                elif finish == 'Satin':
-                    # Subtle sheen
-                    layer_L = np.clip((L - 50) * 1.15 + 50, 0, 100)
-                elif finish == 'Texture':
-                    # 🧱 REALISTIC MULTIPLY BLEND (Best for Walls)
-                    # Maintains shadow definition by multiplying luminance
-                    # L_out = L_orig * (L_target / 100.0)
-                    t_rgb = self.hex_to_rgb(color_hex)
-                    t_lab = cv2.cvtColor(np.uint8([[t_rgb]]), cv2.COLOR_RGB2Lab)[0][0]
-                    target_L = t_lab[0]
-                    # Multiply relative to middle gray for balance
-                    layer_L = np.clip((L * (target_L / 70.0)), 0, 100)
+                layer_L = base_L.copy() # Always reference original L for finish calc
+                if finish == 'Matte': layer_L = np.clip(base_L * 0.85 + 7, 0, 100)
+                elif finish == 'Gloss': layer_L = np.clip((base_L - 50) * 1.35 + 50, 0, 100)
+                elif finish == 'Satin': layer_L = np.clip((base_L - 50) * 1.15 + 50, 0, 100)
+                elif finish == 'Texture': 
+                     t_rgb = self.hex_to_rgb(color_hex)
+                     t_lab = cv2.cvtColor(np.uint8([[t_rgb]]), cv2.COLOR_RGB2Lab)[0][0]
+                     target_L = t_lab[0]
+                     layer_L = np.clip((base_L * (target_L / 70.0)), 0, 100)
                 
-                L = (layer_L * mask_soft) + (L * (1.0 - mask_soft))
+                curr_L_mod = (layer_L * mask_soft) + (curr_L_mod * (1.0 - mask_soft))
 
             curr_A = (target_a * mask_soft) + (curr_A * (1.0 - mask_soft))
             curr_B = (target_b * mask_soft) + (curr_B * (1.0 - mask_soft))
 
-        # 3. Final Single-Pass Conversion
-        final_lab = cv2.merge([L, curr_A, curr_B])
+        # 4. Save Cache
+        st.session_state["comp_cache_state"] = (curr_L_mod.copy(), curr_A.copy(), curr_B.copy())
+        st.session_state["comp_cache_len"] = len(masks_data)
+        if masks_data:
+            st.session_state["comp_cache_last_id"] = id(masks_data[-1])
+        else:
+             st.session_state["comp_cache_last_id"] = None
+
+        # 5. Final Conversion
+        final_lab = cv2.merge([curr_L_mod, curr_A, curr_B])
         final_rgb = cv2.cvtColor(final_lab, cv2.COLOR_Lab2RGB)
         
         return np.clip(final_rgb * 255.0, 0, 255).astype(np.uint8)
