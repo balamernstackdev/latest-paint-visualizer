@@ -235,6 +235,9 @@ def setup_styles():
         .element-container iframe,
         [id$="-overlay"] {{
             touch-action: pinch-zoom !important;
+            -webkit-touch-callout: none !important;
+            -webkit-user-select: none !important;
+            user-select: none !important;
         }}
         
         [data-testid="stSidebar"] {{
@@ -313,6 +316,9 @@ def setup_styles():
         .element-container iframe,
         [id$="-overlay"] {{
             touch-action: pinch-zoom !important;
+            -webkit-touch-callout: none !important;
+            -webkit-user-select: none !important;
+            user-select: none !important;
         }}
 
         [data-testid="stSidebar"] {{

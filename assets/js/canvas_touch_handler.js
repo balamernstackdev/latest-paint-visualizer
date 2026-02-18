@@ -22,6 +22,15 @@
     };
     silence(window);
 
+    // 🛑 BLOCK CONTEXT MENU (PREVENT "SAVE IMAGE" / "SHARE")
+    window.addEventListener('contextmenu', e => {
+        if (e.target.closest('[id$="-overlay"]') || e.target.tagName === 'IFRAME' || e.target.closest('canvas')) {
+            e.preventDefault();
+            e.stopPropagation();
+            return false;
+        }
+    }, { capture: true, passive: false });
+
     // 📱 ADVANCED GESTURE TRACKING
     window.isCanvasGesturing = false;
     window.lastPinchTime = 0;
