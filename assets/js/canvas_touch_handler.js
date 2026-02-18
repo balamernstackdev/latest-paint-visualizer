@@ -42,20 +42,24 @@
 
     // 🛡️ SUPER-STRICT GESTURE INTERCEPTOR (Parent Level)
     // We catch touchstart on the parent to block iframe click logic immediately
-    try {
-        window.parent.document.addEventListener('touchstart', e => {
-            if (e.touches.length > 1) {
-                window.isCanvasGesturing = true;
-                window.lastPinchDist = Math.hypot(e.touches[1].clientX - e.touches[0].clientX, e.touches[1].clientY - e.touches[0].clientY);
-                window.lastPinchCenter = { x: (e.touches[0].clientX + e.touches[1].clientX) / 2, y: (e.touches[0].clientY + e.touches[1].clientY) / 2 };
-            }
-        }, { capture: true, passive: true });
-    } catch (e) { }
+    if (!window.parent.__ANTIGRAVITY_TOUCH_HANDLERS_ATTACHED) {
+        try {
+            window.parent.document.addEventListener('touchstart', e => {
+                if (e.touches.length > 1) {
+                    window.isCanvasGesturing = true;
+                    window.lastPinchDist = Math.hypot(e.touches[1].clientX - e.touches[0].clientX, e.touches[1].clientY - e.touches[0].clientY);
+                    window.lastPinchCenter = { x: (e.touches[0].clientX + e.touches[1].clientX) / 2, y: (e.touches[0].clientY + e.touches[1].clientY) / 2 };
+                }
+            }, { capture: true, passive: true });
+        } catch (e) { }
 
-    // Global tracker for strict multi-touch rules
-    window.parent.document.addEventListener('pointerdown', e => window.activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY }), true);
-    window.parent.document.addEventListener('pointerup', e => window.activePointers.delete(e.pointerId), true);
-    window.parent.document.addEventListener('pointercancel', e => window.activePointers.delete(e.pointerId), true);
+        // Global tracker for strict multi-touch rules
+        window.parent.document.addEventListener('pointerdown', e => window.activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY }), true);
+        window.parent.document.addEventListener('pointerup', e => window.activePointers.delete(e.pointerId), true);
+        window.parent.document.addEventListener('pointercancel', e => window.activePointers.delete(e.pointerId), true);
+
+        window.parent.__ANTIGRAVITY_TOUCH_HANDLERS_ATTACHED = true;
+    }
 
     // Internal tracker for the overlay itself (fallback)
     const trackPointer = (el) => {
