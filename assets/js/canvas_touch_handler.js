@@ -842,8 +842,9 @@
                     window.isCanvasGesturing = true;
 
                     const t1 = e.touches[0], t2 = e.touches[1];
-                    this.initialDist = Math.hypot(t1.pageX - t2.pageX, t1.pageY - t2.pageY);
-                    this.initialMid = { x: (t1.pageX + t2.pageX) / 2, y: (t1.pageY + t2.pageY) / 2 };
+                    // 📏 Use clientX/Y to match getBoundingClientRect (Viewport coords)
+                    this.initialDist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+                    this.initialMid = { x: (t1.clientX + t2.clientX) / 2, y: (t1.clientY + t2.clientY) / 2 };
 
                     const config = window.CANVAS_CONFIG || {};
                     this.initialZoom = parseFloat(config.ZOOM_LEVEL) || 1.0;
@@ -856,8 +857,9 @@
                     if (iframe) {
                         iframe.style.transition = 'none';
                         const rect = el.getBoundingClientRect();
-                        const ox = ((this.initialMid.x - rect.left) / rect.width) * 100;
-                        const oy = ((this.initialMid.y - rect.top) / rect.height) * 100;
+                        // origin is relative to the element (0-100%)
+                        const ox = ((this.initialMid.x - rect.left) / (rect.width || 1)) * 100;
+                        const oy = ((this.initialMid.y - rect.top) / (rect.height || 1)) * 100;
                         iframe.style.transformOrigin = `${ox}% ${oy}%`;
                         iframe.style.opacity = '0.9';
                     }
@@ -868,20 +870,31 @@
                 if (this.isGesturing && e.touches.length === 2) {
                     e.preventDefault();
                     const t1 = e.touches[0], t2 = e.touches[1];
-                    const dist = Math.hypot(t1.pageX - t2.pageX, t1.pageY - t2.pageY);
-                    const mid = { x: (t1.pageX + t2.pageX) / 2, y: (t1.pageY + t2.pageY) / 2 };
+                    const dist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+                    const mid = { x: (t1.clientX + t2.clientX) / 2, y: (t1.clientY + t2.clientY) / 2 };
 
-                    const gestureScale = this.initialDist > 10 ? dist / this.initialDist : 1.0;
+                    // 1. Calculate relative zoom with safety clamp
+                    let gestureScale = this.initialDist > 10 ? dist / this.initialDist : 1.0;
+
+                    const minPossibleScale = 1.0 / (this.initialZoom || 1.0);
+                    if (gestureScale < minPossibleScale) gestureScale = minPossibleScale;
+
+                    // 2. Calculate translation deltas in viewport space
                     const dx = mid.x - this.initialMid.x;
                     const dy = mid.y - this.initialMid.y;
 
                     this.currentTransform = { dx, dy, scale: gestureScale };
 
+                    // 3. Visual Preview (Instant)
                     const iframe = getActiveIframe();
                     if (iframe) {
                         const winW = parent.window.innerWidth;
                         const baseScale = Math.min(1.0, (winW - 10) / CANVAS_WIDTH);
-                        iframe.style.transform = `translate(${dx}px, ${dy}px) scale(${baseScale * gestureScale})`;
+
+                        // Apply movement and scale relative to pinch center
+                        // Clamped scale ensures we stay at least at 'baseScale' size
+                        const visualScale = baseScale * gestureScale;
+                        iframe.style.transform = `translate(${dx}px, ${dy}px) scale(${visualScale})`;
                     }
                 }
             }, { passive: false });
