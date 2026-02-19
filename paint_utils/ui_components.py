@@ -227,8 +227,17 @@ def setup_styles():
 
         /* 📱 MOBILE PINCH-ZOOM LOCKDOWN */
         html, body, .stApp {{
-            touch-action: manipulation !important;
-            overscroll-behavior-y: none;
+            overflow: hidden !important;
+            touch-action: none !important;
+            overscroll-behavior: none !important;
+            height: 100% !important;
+            width: 100% !important;
+            position: fixed !important;
+        }}
+        
+        /* 🔓 Allow Sidebar Scrolling */
+        [data-testid="stSidebar"] {{
+            touch-action: pan-y !important;
         }}
 
         iframe[title="streamlit_drawable_canvas.st_canvas"], 

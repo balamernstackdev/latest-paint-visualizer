@@ -603,18 +603,85 @@
             if (baseScale < 0.1) baseScale = 0.1;
 
             // Combined Scale
-            let totalScale = baseScale * (window.userZoomLevel || 1.0);
+            let userZoom = window.userZoomLevel || 1.0;
+            let totalScale = baseScale * userZoom;
 
-            // Pan Values
+            // Clamping Calculation
+            // We want to restrict the translation so that the edges of the scaled image 
+            // do not go "inside" the viewport edges (avoiding white space).
+            // This is only possible if the image is larger than the viewport (userZoom > 1).
+            // If userZoom <= 1, we force pan to 0 (center).
+
             let px = window.panX || 0;
             let py = window.panY || 0;
+
+            if (userZoom <= 1.0) {
+                px = 0;
+                py = 0;
+            } else {
+                // Determine the visual size difference
+                // visual_w = CANVAS_WIDTH * totalScale
+                // wrapper_w = CANVAS_WIDTH * baseScale
+                // limit = (visual_w - wrapper_w) / 2
+                // But px is in "unscaled pixels" ?? No, px is applied in the transform *before* scale? 
+                // Wait, transform logic below is: translate(${px}px) scale(${totalScale})
+                // No, it's: translate(-50%, -50%) translate(${px}px, ${py}px) scale(${totalScale});
+                // The order matters. translate(px) is applied *before* scale?
+                // The standard is transform: translate(px) scale(...) -> px is in unscaled units if applied before?
+                // Actually translate(...) happens in the local coordinate system of the element.
+                // But the element has width=CANVAS_WIDTH.
+                // So px is in intrinsic CANVAS coordinates.
+
+                // Let's re-verify the math.
+                // Center is (0,0) due to translate(-50%, -50%).
+                // If we translate by dx, the visual center moves by dx * scale?
+                // If I have translate(100px) scale(2), the visual shift is 200px?
+                // CSS Spec: transform functions are multiplied.
+                // matrix = translate(-50%, -50%) * translate(px, py) * scale(s)
+                // NO, they are applied right-to-left mathematically, or left-to-right visually?
+                // "The transformation functions are applied in the order they are written."
+
+                // 1. translate(-50%, -50%): Moves the element so its top-left is at -50% width/height. 
+                //    Effectively centering the element (since it's positioned at top:50%, left:50%).
+                //    Coordinate system is now centered at the element center.
+
+                // 2. translate(px, py): Moves the element by px, py in its current coordinate system.
+                //    Coordinate system is intrinsic (CANVAS coordinates).
+
+                // 3. scale(totalScale): Scales the result.
+
+                // result_visual_pos = (pos + pan) * scale
+
+                // So if we pan by 1 pixel in intrinsic coords, it moves by 'totalScale' pixels on screen.
+
+                // The container size in visual pixels is: wrapper_w = CANVAS_WIDTH * baseScale.
+                // The image size in visual pixels is: visual_w = CANVAS_WIDTH * totalScale.
+
+                // Allowed visual overflow = (visual_w - wrapper_w) / 2.
+                // Allowed intrinsic pan = (Allowed visual overflow) / totalScale.
+                //                       = ( (CANVAS_WIDTH * totalScale) - (CANVAS_WIDTH * baseScale) ) / (2 * totalScale)
+                //                       = ( CANVAS_WIDTH * (totalScale - baseScale) ) / (2 * totalScale)
+                //                       = ( CANVAS_WIDTH * baseScale * (userZoom - 1) ) / (2 * baseScale * userZoom)
+                //                       = ( CANVAS_WIDTH * (userZoom - 1) ) / (2 * userZoom)
+
+                const limitX = (CANVAS_WIDTH * (userZoom - 1)) / (2 * userZoom);
+                const limitY = (CANVAS_HEIGHT * (userZoom - 1)) / (2 * userZoom);
+
+                px = Math.max(-limitX, Math.min(limitX, px));
+                py = Math.max(-limitY, Math.min(limitY, py));
+            }
+
+            // Re-save clamped values to state so it doesn't drift
+            window.panX = px;
+            window.panY = py;
 
             for (let iframe of iframes) {
                 if (iframe.title === "streamlit_drawable_canvas.st_canvas" || iframe.src.includes('streamlit_drawable_canvas')) {
                     const wrapper = iframe.parentElement;
                     if (!wrapper) continue;
 
-                    // Wrapper: Fixed Viewport
+                    // Wrapper Style (User Requirement: Fixed Container)
+                    wrapper.className = "zoom-container"; // match user request class conceptually
                     wrapper.style.cssText = `
                         width: ${Math.floor(CANVAS_WIDTH * baseScale)}px;
                         height: ${Math.floor(CANVAS_HEIGHT * baseScale)}px;
@@ -622,7 +689,7 @@
                         margin: 0 auto !important;
                         display: block !important;
                         overflow: hidden; 
-                        touch-action: none;
+                        touch-action: none; /* 1️⃣ Requirement */
                         user-select: none;
                         -webkit-user-select: none;
                     `;
