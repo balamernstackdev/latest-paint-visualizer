@@ -9,7 +9,7 @@ from functools import wraps
 import time
 
 
-# Create logger
+# Create loggers
 logger = logging.getLogger('paint_visualizer')
 
 def setup_logging(level=logging.INFO, log_file=None):
