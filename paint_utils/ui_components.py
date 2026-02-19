@@ -645,12 +645,21 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                     cb_cancel_pending(); safe_rerun()
 
     original_img = st.session_state["image"]
+    
+    # 🛑 OVERRIDE: Enforce Full-Image Rendering to support smooth Client-Side Zoom
+    # We ignore the passed server-side crop params (start_x, view_w, etc) and render the full image.
+    pass
+    start_x, start_y = 0, 0
+    view_w, view_h = w, h
+    scale_factor = display_width / w if w > 0 else 1.0
+    
     painted_img = composite_image(original_img, st.session_state["masks"])
     show_comp = st.session_state.get("show_comparison", False)
     
     display_img = original_img if show_comp else painted_img
-    cropped_view = display_img[start_y:start_y+view_h, start_x:start_x+view_w]
-    new_h = int(view_h * (display_width / view_w))
+    # Use full image (no cropping)
+    cropped_view = display_img
+    new_h = int(h * (display_width / w))
     final_display_image = cv2.resize(cropped_view, (display_width, new_h), interpolation=cv2.INTER_LINEAR)
     
 
