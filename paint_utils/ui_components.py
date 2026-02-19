@@ -257,10 +257,12 @@ def setup_styles():
             -webkit-touch-callout: none !important;
         }}
         
-        [data-testid="stSidebar"] {{
-            background-color: #f8f9fa !important; 
-            border-right: 1px solid #e6e6e6;
-            width: 350px !important;
+        @media (min-width: 769px) {{
+            [data-testid="stSidebar"] {{
+                background-color: #f8f9fa !important; 
+                border-right: 1px solid #e6e6e6;
+                width: 350px !important;
+            }}
         }}
 
         @media (min-width: 769px) {{
@@ -348,8 +350,29 @@ def setup_styles():
 
         [data-testid="stSidebar"] {{
                 transition: transform 0.3s cubic-bezier(0, 0, 0.2, 1) !important;
-                width: 82vw !important;
-                min-width: 82vw !important;
+                /* Base state: constrained but not forced width (allows collapsing) */
+                max-width: 85vw !important; 
+            }}
+            
+            /* FORCE WIDTH ONLY WHEN OPEN */
+            [data-testid="stSidebar"][aria-expanded="true"] {{
+                width: 85vw !important;
+                min-width: 85vw !important;
+            }}
+            
+            /* FORCE COLLAPSE WHEN CLOSED */
+            [data-testid="stSidebar"][aria-expanded="false"] {{
+                width: 0 !important;
+                min-width: 0 !important;
+                margin-left: 0 !important;
+                transform: translateX(-100%) !important;
+            }}
+
+            /* Ensure main content expands fully */
+            section.main {{
+                margin-left: 0 !important;
+                width: 100% !important;
+                max-width: 100vw !important; /* Safety */
             }}
             
             /* Anti-Squash internal container */
