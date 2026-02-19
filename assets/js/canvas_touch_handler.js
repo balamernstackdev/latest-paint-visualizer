@@ -72,12 +72,7 @@
     // 🤏 GLOBAL PINCH HANDLER
     // 🤏 GLOBAL PINCH & PAN HANDLER (Custom JS)
     // 🤏 GLOBAL PINCH & PAN HANDLER (Centric Zoom)
-    // 🤏 GLOBAL PINCH HANDLER
     const handlePinch = (e) => {
-        // 🛡️ REQ: Sidebar should remain (Native Behavior)
-        // Ensure we don't hijack sidebar scrolls or pinches
-        if (e.target.closest && e.target.closest('[data-testid="stSidebar"]')) return;
-
         if (e.touches.length === 2) {
             window.isCanvasGesturing = true;
 
@@ -125,42 +120,9 @@
         }
     };
 
-    // 🖱️ DESKTOP WHEEL ZOOM HANDLER (Ctrl+Wheel or Trackpad)
-    const handleWheel = (e) => {
-        // Ignore sidebar
-        if (e.target.closest && e.target.closest('[data-testid="stSidebar"]')) return;
-
-        // Check for Zoom Gesture (Ctrl+Wheel or Trackpad Pinch)
-        if (e.ctrlKey || e.metaKey) {
-            e.preventDefault();
-            e.stopPropagation();
-
-            // Sensitivity factor
-            const delta = Math.exp(-e.deltaY * 0.005);
-
-            let newZoom = (window.userZoomLevel || 1.0) * delta;
-            if (newZoom < 0.5) newZoom = 0.5;
-            if (newZoom > 8.0) newZoom = 8.0;
-
-            window.userZoomLevel = newZoom;
-            applyResponsiveScale();
-        }
-        else if ((window.userZoomLevel || 1.0) > 1.0) {
-            // Pan if already zoomed in (and not holding Ctrl)
-            // Prevent browser back/forward swipe
-            e.preventDefault();
-
-            window.panX = (window.panX || 0) - e.deltaX;
-            window.panY = (window.panY || 0) - e.deltaY;
-            applyResponsiveScale();
-        }
-    };
-
     // Attach to parent to catch events before they hit iframe
     try {
         window.parent.document.addEventListener('touchmove', handlePinch, { capture: true, passive: false });
-        window.parent.document.addEventListener('wheel', handleWheel, { capture: true, passive: false }); // Add Wheel Support
-
         window.parent.document.addEventListener('touchend', e => {
             if (e.touches.length < 2) {
                 window.lastPinchDist = 0;
@@ -170,8 +132,6 @@
 
         // Also attach to local window just in case
         window.addEventListener('touchmove', handlePinch, { capture: true, passive: false });
-        window.addEventListener('wheel', handleWheel, { capture: true, passive: false });
-
         window.addEventListener('touchend', e => {
             if (e.touches.length < 2) window.lastPinchDist = 0;
         }, { capture: true });
@@ -619,13 +579,18 @@
             // BASE Scale Calculation
             let baseScale;
             if (winW < 1024) {
-                // Mobile: Fit Width (Full Bleed)
-                // Use winW directly as we removed padding. Subtract just 1px for rounding safety.
-                const targetWidth = winW;
+                // Mobile: Fit Width (minus small margin)
+                const targetWidth = winW - 4;
                 baseScale = targetWidth / CANVAS_WIDTH;
             } else {
                 // Desktop: Fit Both (Contain) to prevent scrolling
-                // Reserve space for header/sidebar (approx 100px vertical)
+                // Reserve space for header/sidebar (approx 100px vertical, 350px sidebar if needed)
+                // But sidebar is handled by Streamlit layout, so available width is key.
+                // However, winW includes sidebar if we look at window.innerWidth? No, usually iframe is inside.
+                // But here we are looking at PARENT window.
+                // So simpler approach: 
+                // Max width = 80vw (or winW - 350), Max height = 85vh
+
                 const maxW = Math.min(winW - 60, 1200); // Constraint width
                 const maxH = winH - 120; // Constraint height
 
