@@ -365,6 +365,8 @@ def setup_styles():
                 width: 0 !important;
                 min-width: 0 !important;
                 margin-left: 0 !important;
+                padding: 0 !important;
+                overflow: hidden !important;
                 transform: translateX(-100%) !important;
             }}
 
