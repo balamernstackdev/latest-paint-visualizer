@@ -563,21 +563,7 @@ def render_zoom_controls(key_suffix="", context_class=""):
     if context_class:
         st.markdown('</div>', unsafe_allow_html=True)
 
-def overlay_pan_controls(image):
-    """Draws semi-transparent pan arrows on the image edges."""
-    h, w, c = image.shape
-    overlay = image.copy()
-    color = (255, 255, 255)
-    thickness = 2
-    margin = 40
-    center_x, center_y = w // 2, h // 2
-    cv2.arrowedLine(overlay, (center_x, margin), (center_x, 10), color, thickness, tipLength=0.5)
-    cv2.arrowedLine(overlay, (center_x, h - margin), (center_x, h - 10), color, thickness, tipLength=0.5)
-    cv2.arrowedLine(overlay, (margin, center_y), (10, center_y), color, thickness, tipLength=0.5)
-    cv2.arrowedLine(overlay, (w - margin, center_y), (w - 10, center_y), color, thickness, tipLength=0.5)
-    alpha = 0.6
-    cv2.addWeighted(overlay, alpha, image, 1 - alpha, 0, image)
-    return image
+
 
 
 @st.fragment
@@ -667,8 +653,7 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
     new_h = int(view_h * (display_width / view_w))
     final_display_image = cv2.resize(cropped_view, (display_width, new_h), interpolation=cv2.INTER_LINEAR)
     
-    if st.session_state.get("zoom_level", 1.0) > 1.0:
-        final_display_image = overlay_pan_controls(final_display_image)
+
 
     display_height = final_display_image.shape[0]
     sam = get_sam_engine(CHECKPOINT_PATH, MODEL_TYPE)

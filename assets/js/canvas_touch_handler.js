@@ -1063,7 +1063,7 @@
         editors.forEach(ed => {
             ed.checkMode();
             if (ed.overlay && !ed.overlay._gestureAttached) {
-                multiTouch.attach(ed.overlay);
+                // multiTouch.attach(ed.overlay); // 🛑 DISABLED: Using Global handlePinch for smooth Client-Side Zoom
                 ed.overlay._gestureAttached = true;
             }
         });
