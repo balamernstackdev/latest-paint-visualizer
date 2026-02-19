@@ -348,14 +348,43 @@ def setup_styles():
 
         [data-testid="stSidebar"] {{
                 transition: transform 0.3s cubic-bezier(0, 0, 0.2, 1) !important;
-                width: 82vw !important;
-                min-width: 82vw !important;
+                /* Base state: constrained but not forced width (allows collapsing) */
+                max-width: 85vw !important; 
+                padding: 0 !important; /* KILL PARENT PADDING (Fixes Red Ghost) */
+                overflow-x: hidden !important; 
             }}
             
-            /* Anti-Squash internal container */
+            /* FORCE WIDTH ONLY WHEN OPEN */
+            [data-testid="stSidebar"][aria-expanded="true"] {{
+                width: 85vw !important;
+                min-width: 85vw !important;
+            }}
+            
+            /* FORCE COLLAPSE WHEN CLOSED */
+            [data-testid="stSidebar"][aria-expanded="false"] {{
+                width: 0 !important;
+                min-width: 0 !important;
+                margin-left: 0 !important;
+                padding: 0 !important;
+                overflow: hidden !important;
+                transform: translateX(-100%) !important;
+            }}
+
+            /* Ensure main content expands fully */
+            section.main {{
+                margin-left: 0 !important;
+                width: 100% !important;
+                max-width: 100vw !important; /* Safety */
+            }}
+            
+            /* Restore padding on inner content container */
             [data-testid="stSidebar"] > div:first-child {{
                 width: 100% !important;
                 min-width: 100% !important;
+                padding-top: 50px !important; /* Space for close button */
+                padding-left: 20px !important;
+                padding-right: 20px !important;
+                padding-bottom: 50px !important;
             }}
 
             /* DO NOT HIDE [data-testid="stSidebar"] + div as it is the main workspace */
