@@ -376,8 +376,11 @@ def setup_styles():
             }}
             
             .main .block-container {{
-                padding-bottom: 140px !important;
+                padding-bottom: 250px !important;
                 padding-top: 1rem !important;
+                padding-left: 0 !important;
+                padding-right: 0 !important;
+                max-width: 100vw !important;
             }}
         }}
 
