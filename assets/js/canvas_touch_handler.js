@@ -569,15 +569,37 @@
             if (!iframes.length) return;
 
             let winW = parent.window.innerWidth || parent.document.documentElement.clientWidth;
+            let winH = parent.window.innerHeight || parent.document.documentElement.clientHeight;
+
             if (parent.window.visualViewport) {
                 winW = parent.window.visualViewport.width;
+                winH = parent.window.visualViewport.height;
             }
 
-            const targetWidth = winW < 1024 ? winW - 4 : winW - 40;
-            if (targetWidth <= 50 || !CANVAS_WIDTH) return;
+            // BASE Scale Calculation
+            let baseScale;
+            if (winW < 1024) {
+                // Mobile: Fit Width (minus small margin)
+                const targetWidth = winW - 4;
+                baseScale = targetWidth / CANVAS_WIDTH;
+            } else {
+                // Desktop: Fit Both (Contain) to prevent scrolling
+                // Reserve space for header/sidebar (approx 100px vertical, 350px sidebar if needed)
+                // But sidebar is handled by Streamlit layout, so available width is key.
+                // However, winW includes sidebar if we look at window.innerWidth? No, usually iframe is inside.
+                // But here we are looking at PARENT window.
+                // So simpler approach: 
+                // Max width = 80vw (or winW - 350), Max height = 85vh
 
-            // BASE Scale
-            let baseScale = targetWidth / CANVAS_WIDTH;
+                const maxW = Math.min(winW - 60, 1200); // Constraint width
+                const maxH = winH - 120; // Constraint height
+
+                const scaleW = maxW / CANVAS_WIDTH;
+                const scaleH = maxH / CANVAS_HEIGHT;
+
+                baseScale = Math.min(scaleW, scaleH);
+            }
+
             if (baseScale < 0.1) baseScale = 0.1;
 
             // Combined Scale
