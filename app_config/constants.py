@@ -21,7 +21,8 @@ class SegmentationConfig:
     
     COLOR_DIFF_WALL_MODE = 95
     # Original edge detection: 30 - balanced edge detection
-    EDGE_THRESHOLD_WALL_MODE = 10
+    # UPDATED: Increased to 25 to prevent faint textue edges from cutting off wall flow
+    EDGE_THRESHOLD_WALL_MODE = 25
     
     # --- Intelligent Object Detection (for auto mask selection) ---
     # Thresholds to detect doors/windows vs walls in Standard Walls mode
@@ -54,7 +55,8 @@ class SegmentationConfig:
     SMALL_OBJECT_THRESHOLD = 0.03
     
     # Maximum area for noise filtering (0.3% of image area)
-    NOISE_AREA_THRESHOLD = 0.003
+    # INCREASED to 0.01 (1%) to robustly fill small gaps/holes
+    NOISE_AREA_THRESHOLD = 0.01
     
     # --- Distance Decay Parameters ---
     # Maximum distance (pixels) before tolerance starts decaying
@@ -66,7 +68,8 @@ class SegmentationConfig:
     
     # --- Morphological Operations ---
     # Kernel size for morphological operations
-    MORPH_KERNEL_SIZE = (3, 3)
+    # INCREASED for better closing of gaps
+    MORPH_KERNEL_SIZE = (5, 5)
     
     # Gaussian blur kernel for mask smoothing
     GAUSSIAN_KERNEL_SIZE = (3, 3)
@@ -76,14 +79,16 @@ class SegmentationConfig:
     
     # --- SAM Model Parameters ---
     # Minimum score threshold for accepting SAM predictions
-    SAM_MIN_SCORE = 0.4
+    # LOWERED to capture weaker wall segments
+    SAM_MIN_SCORE = 0.1
     
     # Connectivity for connected components (4 or 8)
     CONNECTED_COMPONENTS_CONNECTIVITY = 8
     
     # --- Component Filtering (to prevent small object leaks) ---
     # Minimum component size as ratio of clicked component (0.15 = 15%)
-    MIN_COMPONENT_RATIO = 0.15
+    # REDUCED to 0.02 (2%) to keep small detached wall parts (e.g. behind plants)
+    MIN_COMPONENT_RATIO = 0.02
     
     # Max distance allowed from click for disconnected pieces (pixels)
     MAX_COMPONENT_DISTANCE = 250

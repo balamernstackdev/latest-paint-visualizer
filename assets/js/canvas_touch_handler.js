@@ -72,7 +72,12 @@
     // 🤏 GLOBAL PINCH HANDLER
     // 🤏 GLOBAL PINCH & PAN HANDLER (Custom JS)
     // 🤏 GLOBAL PINCH & PAN HANDLER (Centric Zoom)
+    // 🤏 GLOBAL PINCH HANDLER
     const handlePinch = (e) => {
+        // 🛡️ REQ: Sidebar should remain (Native Behavior)
+        // Ensure we don't hijack sidebar scrolls or pinches
+        if (e.target.closest && e.target.closest('[data-testid="stSidebar"]')) return;
+
         if (e.touches.length === 2) {
             window.isCanvasGesturing = true;
 
@@ -120,9 +125,42 @@
         }
     };
 
+    // 🖱️ DESKTOP WHEEL ZOOM HANDLER (Ctrl+Wheel or Trackpad)
+    const handleWheel = (e) => {
+        // Ignore sidebar
+        if (e.target.closest && e.target.closest('[data-testid="stSidebar"]')) return;
+
+        // Check for Zoom Gesture (Ctrl+Wheel or Trackpad Pinch)
+        if (e.ctrlKey || e.metaKey) {
+            e.preventDefault();
+            e.stopPropagation();
+
+            // Sensitivity factor
+            const delta = Math.exp(-e.deltaY * 0.005);
+
+            let newZoom = (window.userZoomLevel || 1.0) * delta;
+            if (newZoom < 0.5) newZoom = 0.5;
+            if (newZoom > 8.0) newZoom = 8.0;
+
+            window.userZoomLevel = newZoom;
+            applyResponsiveScale();
+        }
+        else if ((window.userZoomLevel || 1.0) > 1.0) {
+            // Pan if already zoomed in (and not holding Ctrl)
+            // Prevent browser back/forward swipe
+            e.preventDefault();
+
+            window.panX = (window.panX || 0) - e.deltaX;
+            window.panY = (window.panY || 0) - e.deltaY;
+            applyResponsiveScale();
+        }
+    };
+
     // Attach to parent to catch events before they hit iframe
     try {
         window.parent.document.addEventListener('touchmove', handlePinch, { capture: true, passive: false });
+        window.parent.document.addEventListener('wheel', handleWheel, { capture: true, passive: false }); // Add Wheel Support
+
         window.parent.document.addEventListener('touchend', e => {
             if (e.touches.length < 2) {
                 window.lastPinchDist = 0;
@@ -132,6 +170,8 @@
 
         // Also attach to local window just in case
         window.addEventListener('touchmove', handlePinch, { capture: true, passive: false });
+        window.addEventListener('wheel', handleWheel, { capture: true, passive: false });
+
         window.addEventListener('touchend', e => {
             if (e.touches.length < 2) window.lastPinchDist = 0;
         }, { capture: true });

@@ -161,90 +161,75 @@ class SegmentationEngine:
                     
                     # Analyze all 3 masks
                     best_mask = masks[0]  # Default
-                    best_door_score = -1
                     
-                    for idx in range(3):
-                        mask_area = np.sum(masks[idx])
-                        if mask_area == 0: continue
+                    if is_wall_click:
+                        # 1️⃣ MERGE ALL WALL REGIONS (User Request)
+                        # Instead of picking one, we unite all valid masks to ensure no gaps.
+                        # We exclude masks that are "Too Big" (e.g. > 95% of image) as they are likely errors.
+                        combined_mask = np.zeros_like(masks[0], dtype=bool)
+                        merged_count = 0
                         
-                        mask_coords = np.argwhere(masks[idx] > 0)
-                        y_coords, x_coords = mask_coords[:, 0], mask_coords[:, 1]
-                        mask_height = np.max(y_coords) - np.min(y_coords) + 1
-                        mask_width = np.max(x_coords) - np.min(x_coords) + 1
+                        sorted_indices = np.argsort(scores)[::-1] # High to low
                         
-                        # Calculate characteristics
-                        area_ratio = mask_area / image_area
-                        aspect_ratio = mask_height / max(mask_width, 1)
+                        for idx in sorted_indices:
+                             mask_area = np.sum(masks[idx])
+                             ratio = mask_area / image_area
+                             
+                             # Valid wall region conditions:
+                             # 1. Not tiny (< 0.1% - noise)
+                             # 2. Not huge (> 95% - likely whole image error)
+                             # 3. Score must be decent (using relaxed NEW threshold)
+                             if ratio > 0.001 and ratio < 0.95 and scores[idx] > SegmentationConfig.SAM_MIN_SCORE:
+                                  combined_mask = np.logical_or(combined_mask, masks[idx])
+                                  merged_count += 1
                         
-                        # Updated: Only count as door if area is genuinely small
-                        door_score = 0
-                        if area_ratio < 0.20:
-                            if aspect_ratio > 1.3: door_score += 2
-                            if area_ratio < 0.08: door_score += 3
-                            if aspect_ratio > 1.8: door_score += 3
+                        if merged_count > 0:
+                            best_mask = combined_mask
+                            print(f"DEBUG: Merged {merged_count} wall masks for full coverage.")
+                        else:
+                            # Fallback to standard selection
+                            best_mask = masks[np.argmax(scores)]
 
-                        print(f"Mask {idx}: area={area_ratio*100:.1f}%, aspect={aspect_ratio:.2f}, score={scores[idx]:.2f}, door_score={door_score}")
+                    else:
+                        # STANDARD OBJECT SELECTION (Non-Wall)
+                        best_door_score = -1
+                        for idx in range(3):
+                            mask_area = np.sum(masks[idx])
+                            if mask_area == 0: continue
+                            
+                            mask_coords = np.argwhere(masks[idx] > 0)
+                            y_coords, x_coords = mask_coords[:, 0], mask_coords[:, 1]
+                            mask_height = np.max(y_coords) - np.min(y_coords) + 1
+                            mask_width = np.max(x_coords) - np.min(x_coords) + 1
+                            
+                            # Calculate characteristics
+                            area_ratio = mask_area / image_area
+                            aspect_ratio = mask_height / max(mask_width, 1)
+                            
+                            # Only count as door if area is genuinely small
+                            door_score = 0
+                            if area_ratio < 0.20:
+                                if aspect_ratio > 1.3: door_score += 2
+                                if area_ratio < 0.08: door_score += 3
+                                if aspect_ratio > 1.8: door_score += 3
+
+                            # Priority: Best Door Match
+                            if door_score > best_door_score and (best_door_score != 0 or door_score > 4):
+                                best_door_score = door_score
+                                best_mask = masks[idx]
                         
-                        
-                        # Priority 1: Large Area (ONLY for Wall Click Mode)
-                        # We only auto-grab large masks if the user is explicitly using the Wall tool
-                        if is_wall_click and area_ratio > 0.25:
-                             current_best_area = np.sum(best_mask) / image_area
-                             if area_ratio > current_best_area:
-                                 best_mask = masks[idx]
-                                 best_door_score = 0 
-                                 continue
-                        
-                        # Priority 2: Best Door Match (for both modes, helps avoid bleeding)
-                        if door_score > best_door_score and (best_door_score != 0 or door_score > 4):
-                            best_door_score = door_score
-                            best_mask = masks[idx]
-                    
-                    print(f"Selected mask with door_score={best_door_score}")
-                    
-                    # SAFETY MARGIN: If we detected a door/window (score >= 5), apply erosion
-                    # to create a margin that prevents bleeding onto adjacent walls
-                    if best_door_score >= 5:
-                        # Calculate erosion strength based on mask size
-                        mask_area = np.sum(best_mask)
-                        area_ratio = mask_area / image_area
-                        
-                        # REDUCED EROSION STRENGTH to prevent gaps (User Feedback)
-                        if area_ratio < 0.05:  # Very small (< 5%)
-                            kernel_size = 3    
-                            iterations = 1     
-                        elif area_ratio < 0.10:  # (Small < 10%)
-                            kernel_size = 3
-                            iterations = 1      # Reduced from 2
-                        elif area_ratio < 0.15:  # Medium small (< 15%)
-                            kernel_size = 3
-                            iterations = 1
-                        else:  # Large objects need less erosion
-                            kernel_size = 3
-                            iterations = 1
-                        
-                        # Only apply if ratio is significant enough to warrant it (skip for tiny details)
-                        if area_ratio > 0.005:
-                            erode_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
-                            best_mask = cv2.erode(best_mask.astype(np.uint8), erode_kernel, iterations=iterations).astype(bool)
-                            print(f"Applied erosion: kernel={kernel_size}x{kernel_size}, iterations={iterations}")
-                        else:
-                            print(f"Skipped erosion for tiny object (ratio={area_ratio:.4f})")
-                    
-                    # If no mask looks like a door (score < 3), use default behavior
-                    if best_door_score < 3:
-                        # Re-calculate area of the masks to be sure we pick the right one
-                        area0 = np.sum(masks[0])
-                        area1 = np.sum(masks[1])
-                        area2 = np.sum(masks[2])
-                        
-                        if is_wall_click:
-                            # In Wall mode, if no door, always take the biggest mask
-                            best_idx = np.argmax([area0, area1, area2])
-                            best_mask = masks[best_idx]
-                        else:
-                            # Standard mode: Stay granular
-                            if area0 < SegmentationConfig.MIN_MASK_AREA_PIXELS:
+                        # Apply erosion only for clearly identified doors/windows to prevent bleeding
+                        if best_door_score >= 5:
+                            mask_area = np.sum(best_mask)
+                            area_ratio = mask_area / image_area
+                            
+                            if area_ratio < 0.15:
+                                erode_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+                                best_mask = cv2.erode(best_mask.astype(np.uint8), erode_kernel, iterations=1).astype(bool)
+                                
+                        if best_door_score < 3:
+                            # Standard fallback
+                            if np.sum(masks[0]) < SegmentationConfig.MIN_MASK_AREA_PIXELS:
                                 best_idx = np.argmax(scores)
                                 best_mask = masks[best_idx]
                             else:
@@ -442,36 +427,45 @@ class SegmentationEngine:
                     if ref_x is not None and ref_y is not None:
                          cv2.circle(mask_refined, (ref_x, ref_y), SegmentationConfig.CLICK_PRESERVE_RADIUS, 1, -1) 
 
-                # --- SELECTIVE HOLE FILLING ---
-                if level == 0 or box_coords is not None:
-                    # Skip erosion/closing for Small Objects to prevent deleting thin lines
-                    # CRITICAL: Also skip for level 0 to preserve eroded safety margins for doors/windows
-                    if not (level == 0 and is_small_object):
-                        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, SegmentationConfig.MORPH_KERNEL_SIZE)
-                        mask_refined = cv2.morphologyEx(mask_refined, cv2.MORPH_CLOSE, kernel)
+                # --- SELECTIVE HOLE FILLING & CLOSING ---
+                if (level == 0 and not is_small_object) or box_coords is not None:
+                    # 2️⃣ APPLY MORPHOLOGICAL CLOSING (Dilate -> Erode)
+                    # This fills small gaps/cracks in the mask (User Request)
+                    # For walls, we use a stronger closing to ensure solidity
+                    close_iters = 2 if is_wall_click else 1
+                    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, SegmentationConfig.MORPH_KERNEL_SIZE)
+                    mask_refined = cv2.morphologyEx(mask_refined, cv2.MORPH_CLOSE, kernel, iterations=close_iters)
                     
-                    # Selective internal hole filling using HIERARCHY
-                    # RETR_CCOMP returns hierarchy [Next, Previous, First_Child, Parent]
-                    # If a contour has a parent (hierarchy[i][3] != -1), it's an internal hole.
+                    # 3️⃣ REMOVE TINY FALSE NEGATIVES (Hole Fills)
+                    # Use connected components on the INVERSE to find holes
                     cnts, hierarchy = cv2.findContours(mask_refined, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
                     out_mask = np.copy(mask_refined)
-
+                    
                     if hierarchy is not None:
-                        hierarchy = hierarchy[0] # flatten
+                        hierarchy = hierarchy[0] 
                         for i, c in enumerate(cnts):
                             parent_idx = hierarchy[i][3]
-                            if parent_idx != -1: # It is a hole (has a parent)
+                            if parent_idx != -1: # It is a hole (internal contour)
                                 area = cv2.contourArea(c)
-                                if area < (h * w * 0.005): # Increased to 0.5% (was 0.05%) to catch brick textures
-                                    # 🖼️ ULTRA PROTECT: Does the hole contain ANY details?
-                                    hole_roi = np.zeros_like(mask_refined)
-                                    cv2.drawContours(hole_roi, [c], -1, 1, thickness=-1)
-                                    avg_edge = cv2.mean(self.image_edges_map, mask=hole_roi)[0]
+                                should_fill = False
+                                
+                                # Use relaxed threshold from config
+                                if area < (h * w * SegmentationConfig.NOISE_AREA_THRESHOLD):
+                                    if is_wall_click:
+                                        # FORCE FILL patches in wall mode (unless huge)
+                                        # We ignore edge energy because shadows/texture often have edges
+                                        should_fill = True
+                                    else:
+                                        # Standard mode: check for details
+                                        hole_roi = np.zeros_like(mask_refined)
+                                        cv2.drawContours(hole_roi, [c], -1, 1, thickness=-1)
+                                        avg_edge = cv2.mean(self.image_edges_map, mask=hole_roi)[0]
+                                        if avg_edge < 15.0: # Relaxed from 8.0 -> 15.0
+                                            should_fill = True
+                                
+                                if should_fill:
+                                    cv2.drawContours(out_mask, [c], -1, 1, thickness=-1)
                                     
-                                    # We increased this from 3 to 8. Most shadows behind plants have moderate edge 
-                                    # energy, but artwork has VERY high edge energy.
-                                    if avg_edge < 8.0: 
-                                        cv2.drawContours(out_mask, [c], -1, 1, thickness=-1)
                     mask_refined = out_mask
                 elif level == 1:
                     # Level 1 (Small Objects): No hole filling or closing to preserve lattice/mesh details
@@ -507,8 +501,20 @@ class SegmentationEngine:
                         
                         target_label = labels_im[iy, ix]
                         if target_label != 0:
-                            # Use intelligent filter to remove small/far disconnected objects (pots, artifacts)
-                            best_mask = self._filter_small_components(mask_uint8, ref_x, ref_y, target_label, labels_im, stats, centroids)
+                            if is_wall_click:
+                                # 🟢 WALL MODE FIX: Trust the merged mask!
+                                # Instead of isolating only the clicked component, we keep ALL significant pieces.
+                                # Just filter out tiny noise (e.g. < 0.5% of image)
+                                min_area = h * w * 0.005
+                                cleaned_mask = np.zeros_like(best_mask)
+                                # Keep target component + any large enough components
+                                for i in range(1, num_labels):
+                                    if i == target_label or stats[i, cv2.CC_STAT_AREA] > min_area:
+                                        cleaned_mask |= (labels_im == i)
+                                best_mask = cleaned_mask
+                            else:
+                                # Standard Object Mode: Strict isolation
+                                best_mask = self._filter_small_components(mask_uint8, ref_x, ref_y, target_label, labels_im, stats, centroids)
                         else:
                             max_area = 0
                             max_label = 1
