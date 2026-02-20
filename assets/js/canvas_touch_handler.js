@@ -862,6 +862,8 @@
             }
         } catch (e) { }
     }
+    // 🌐 Expose so external scripts (zoom buttons, reset) can call it
+    window.applyResponsiveScale = applyResponsiveScale;
 
     class PolygonEditor extends BaseEditor {
         constructor() {

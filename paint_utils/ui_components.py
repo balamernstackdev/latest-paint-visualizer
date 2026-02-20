@@ -579,25 +579,118 @@ def sidebar_paint_fragment():
 
 
 def render_zoom_controls(key_suffix="", context_class=""):
-    """Render zoom and pan controls.
+    """Render instant-response zoom controls using pure HTML/JS buttons.
+
+    Why HTML buttons instead of st.button():
+        st.button() triggers a full server rerun before any JS runs — so zoom
+        feedback is delayed by the network round-trip. Pure HTML onclick fires
+        JS immediately at the moment of the tap, giving instant visual feedback.
+
+    The JS finds the canvas iframe by looking for window.applyResponsiveScale
+    (exposed on window by canvas_touch_handler.js) and calls it directly.
+
     Args:
-        key_suffix: Unique suffix for widget keys to prevent duplicates.
-        context_class: CSS class to wrap the controls (e.g. 'mobile-zoom-wrapper') for responsive hiding.
+        key_suffix: Unique suffix for widget keys (used only for reset button).
+        context_class: CSS class for responsive hiding (e.g. 'mobile-zoom-wrapper').
     """
-    # Wrap in a container that we can target with CSS if possible, or just apply classes to elements
+    import streamlit.components.v1 as _components
+
     if context_class:
         st.markdown(f'<div class="{context_class}">', unsafe_allow_html=True)
 
-    # Simplified Zoom: Removed manual +/- buttons, pinch to zoom is preferred.
-    if st.session_state.get("zoom_level", 1.0) > 1.0 or st.session_state.get("pan_x", 0.5) != 0.5 or st.session_state.get("pan_y", 0.5) != 0.5:
-        if st.button("🎯 Reset View", use_container_width=True, key=f"reset_view_{key_suffix}"):
-            st.session_state["zoom_level"] = 1.0
-            st.session_state["pan_x"] = 0.5
-            st.session_state["pan_y"] = 0.5
-            st.session_state["render_id"] += 1
-            st.session_state["canvas_id"] = st.session_state.get("canvas_id", 0) + 1
-            st.rerun()
-            
+    # ── Pure-HTML zoom buttons (instant, no server round-trip) ────────────
+    zoom_html = f"""
+    <style>
+    .ag-zoom-row {{
+        display: flex; gap: 8px; align-items: center; margin: 4px 0;
+    }}
+    .ag-zoom-btn {{
+        flex: 1;
+        height: 38px;
+        border: 1px solid rgba(49,51,63,0.2);
+        background: #fff;
+        border-radius: 6px;
+        font-size: 18px;
+        cursor: pointer;
+        touch-action: manipulation;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.07);
+        transition: background 0.15s;
+        -webkit-tap-highlight-color: transparent;
+    }}
+    .ag-zoom-btn:active {{ background: #f0f2f6; }}
+    .ag-zoom-level {{
+        flex: 2; text-align: center; font-weight: bold;
+        background: #f0f2f6; color: #31333F;
+        padding: 6px 10px; border-radius: 4px;
+        border: 1px solid #dcdcdc; font-size: 14px;
+        white-space: nowrap;
+    }}
+    .ag-reset-btn {{
+        width: 100%; height: 36px; margin-top: 4px;
+        border: 1px solid #dcdcdc; background: #fff;
+        border-radius: 6px; font-size: 13px; cursor: pointer;
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
+        display: none;
+    }}
+    .ag-reset-btn:active {{ background: #f0f2f6; }}
+    </style>
+    <script>
+    (function() {{
+        // Find the canvas iframe that has applyResponsiveScale exposed
+        const _findCanvas = () => {{
+            const doc = window.parent ? window.parent.document : document;
+            const frames = doc.querySelectorAll('iframe');
+            for (const f of frames) {{
+                try {{
+                    const w = f.contentWindow;
+                    if (w && typeof w.applyResponsiveScale === 'function') return w;
+                }} catch(e) {{}}
+            }}
+            return null;
+        }};
+
+        window.__ag_zoom = (delta) => {{
+            const cw = _findCanvas();
+            if (!cw) return;
+            cw.userZoomLevel = Math.max(0.5, Math.min(8.0, (cw.userZoomLevel || 1.0) + delta));
+            cw.panX = cw.panX || 0;
+            cw.panY = cw.panY || 0;
+            cw.applyResponsiveScale();
+            // Update level display in all zoom widgets
+            const lvl = Math.round(cw.userZoomLevel * 100);
+            document.querySelectorAll('.ag-zoom-level').forEach(el => el.textContent = lvl + '%');
+            // Show/hide reset
+            const show = cw.userZoomLevel > 1.005 || Math.abs(cw.panX) > 1 || Math.abs(cw.panY) > 1;
+            document.querySelectorAll('.ag-reset-btn').forEach(el => el.style.display = show ? 'block' : 'none');
+        }};
+
+        window.__ag_zoom_reset = () => {{
+            const cw = _findCanvas();
+            if (!cw) return;
+            cw.userZoomLevel = 1.0;
+            cw.panX = 0; cw.panY = 0;
+            if (cw._pinch) cw._pinch.active = false;
+            cw.applyResponsiveScale();
+            document.querySelectorAll('.ag-zoom-level').forEach(el => el.textContent = '100%');
+            document.querySelectorAll('.ag-reset-btn').forEach(el => el.style.display = 'none');
+        }};
+    }})();
+    </script>
+    <div class="ag-zoom-row">
+        <button class="ag-zoom-btn" onclick="window.__ag_zoom(-0.25)" aria-label="Zoom Out">➖</button>
+        <div class="ag-zoom-level" id="ag-zoom-display-{key_suffix}">
+            {int(st.session_state.get('zoom_level', 1.0) * 100)}%
+        </div>
+        <button class="ag-zoom-btn" onclick="window.__ag_zoom(0.25)" aria-label="Zoom In">➕</button>
+    </div>
+    <button class="ag-reset-btn" id="ag-reset-btn-{key_suffix}"
+            onclick="window.__ag_zoom_reset()" aria-label="Reset View">
+        🎯 Reset View
+    </button>
+    """
+    _components.html(zoom_html, height=70, scrolling=False)
+
     if context_class:
         st.markdown('</div>', unsafe_allow_html=True)
 
