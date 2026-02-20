@@ -579,117 +579,90 @@ def sidebar_paint_fragment():
 
 
 def render_zoom_controls(key_suffix="", context_class=""):
-    """Render instant-response zoom controls using pure HTML/JS buttons.
+    """Render touch-only zoom controls.
 
-    Why HTML buttons instead of st.button():
-        st.button() triggers a full server rerun before any JS runs — so zoom
-        feedback is delayed by the network round-trip. Pure HTML onclick fires
-        JS immediately at the moment of the tap, giving instant visual feedback.
-
-    The JS finds the canvas iframe by looking for window.applyResponsiveScale
-    (exposed on window by canvas_touch_handler.js) and calls it directly.
+    Zoom is handled entirely by pinch-to-zoom gestures (canvas_touch_handler.js).
+    This function only shows a Reset View button when the user is currently zoomed
+    in, so they can snap back to the default view.
 
     Args:
-        key_suffix: Unique suffix for widget keys (used only for reset button).
-        context_class: CSS class for responsive hiding (e.g. 'mobile-zoom-wrapper').
+        key_suffix: Unique suffix for widget keys to prevent duplicates.
+        context_class: CSS class for responsive hiding.
     """
     import streamlit.components.v1 as _components
 
     if context_class:
         st.markdown(f'<div class="{context_class}">', unsafe_allow_html=True)
 
-    # ── Pure-HTML zoom buttons (instant, no server round-trip) ────────────
-    zoom_html = f"""
-    <style>
-    .ag-zoom-row {{
-        display: flex; gap: 8px; align-items: center; margin: 4px 0;
-    }}
-    .ag-zoom-btn {{
-        flex: 1;
-        height: 38px;
-        border: 1px solid rgba(49,51,63,0.2);
-        background: #fff;
-        border-radius: 6px;
-        font-size: 18px;
-        cursor: pointer;
-        touch-action: manipulation;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.07);
-        transition: background 0.15s;
-        -webkit-tap-highlight-color: transparent;
-    }}
-    .ag-zoom-btn:active {{ background: #f0f2f6; }}
-    .ag-zoom-level {{
-        flex: 2; text-align: center; font-weight: bold;
-        background: #f0f2f6; color: #31333F;
-        padding: 6px 10px; border-radius: 4px;
-        border: 1px solid #dcdcdc; font-size: 14px;
-        white-space: nowrap;
-    }}
-    .ag-reset-btn {{
-        width: 100%; height: 36px; margin-top: 4px;
-        border: 1px solid #dcdcdc; background: #fff;
-        border-radius: 6px; font-size: 13px; cursor: pointer;
-        touch-action: manipulation;
-        -webkit-tap-highlight-color: transparent;
-        display: none;
-    }}
-    .ag-reset-btn:active {{ background: #f0f2f6; }}
-    </style>
+    # Only show Reset View when user has zoomed/panned via pinch gesture.
+    # We check JS-side state via a small script to keep the button visible
+    # even though session_state["zoom_level"] may not reflect client-side zoom.
+    reset_html = """
     <script>
-    (function() {{
-        // Find the canvas iframe that has applyResponsiveScale exposed
-        const _findCanvas = () => {{
+    (function() {
+        const _findCanvas = () => {
             const doc = window.parent ? window.parent.document : document;
-            const frames = doc.querySelectorAll('iframe');
-            for (const f of frames) {{
-                try {{
+            for (const f of doc.querySelectorAll('iframe')) {
+                try {
                     const w = f.contentWindow;
                     if (w && typeof w.applyResponsiveScale === 'function') return w;
-                }} catch(e) {{}}
-            }}
+                } catch(e) {}
+            }
             return null;
-        }};
+        };
 
-        window.__ag_zoom = (delta) => {{
+        const btn = document.getElementById('ag-reset-only-btn');
+        if (btn) {
+            // Show/hide based on actual JS zoom state (not server state)
+            const cw = _findCanvas();
+            if (cw) {
+                const isZoomed = (cw.userZoomLevel || 1.0) > 1.02
+                              || Math.abs(cw.panX || 0) > 2
+                              || Math.abs(cw.panY || 0) > 2;
+                btn.style.display = isZoomed ? 'block' : 'none';
+            }
+
+            btn.onclick = () => {
+                const cw2 = _findCanvas();
+                if (!cw2) return;
+                cw2.userZoomLevel = 1.0;
+                cw2.panX = 0;
+                cw2.panY = 0;
+                if (cw2._pinch) cw2._pinch.active = false;
+                cw2.applyResponsiveScale();
+                btn.style.display = 'none';
+            };
+        }
+
+        // Re-check every second so button appears after a pinch gesture
+        setInterval(() => {
+            const b = document.getElementById('ag-reset-only-btn');
+            if (!b) return;
             const cw = _findCanvas();
             if (!cw) return;
-            cw.userZoomLevel = Math.max(0.5, Math.min(8.0, (cw.userZoomLevel || 1.0) + delta));
-            cw.panX = cw.panX || 0;
-            cw.panY = cw.panY || 0;
-            cw.applyResponsiveScale();
-            // Update level display in all zoom widgets
-            const lvl = Math.round(cw.userZoomLevel * 100);
-            document.querySelectorAll('.ag-zoom-level').forEach(el => el.textContent = lvl + '%');
-            // Show/hide reset
-            const show = cw.userZoomLevel > 1.005 || Math.abs(cw.panX) > 1 || Math.abs(cw.panY) > 1;
-            document.querySelectorAll('.ag-reset-btn').forEach(el => el.style.display = show ? 'block' : 'none');
-        }};
-
-        window.__ag_zoom_reset = () => {{
-            const cw = _findCanvas();
-            if (!cw) return;
-            cw.userZoomLevel = 1.0;
-            cw.panX = 0; cw.panY = 0;
-            if (cw._pinch) cw._pinch.active = false;
-            cw.applyResponsiveScale();
-            document.querySelectorAll('.ag-zoom-level').forEach(el => el.textContent = '100%');
-            document.querySelectorAll('.ag-reset-btn').forEach(el => el.style.display = 'none');
-        }};
-    }})();
+            const isZoomed = (cw.userZoomLevel || 1.0) > 1.02
+                          || Math.abs(cw.panX || 0) > 2
+                          || Math.abs(cw.panY || 0) > 2;
+            b.style.display = isZoomed ? 'block' : 'none';
+        }, 1000);
+    })();
     </script>
-    <div class="ag-zoom-row">
-        <button class="ag-zoom-btn" onclick="window.__ag_zoom(-0.25)" aria-label="Zoom Out">➖</button>
-        <div class="ag-zoom-level" id="ag-zoom-display-{key_suffix}">
-            {int(st.session_state.get('zoom_level', 1.0) * 100)}%
-        </div>
-        <button class="ag-zoom-btn" onclick="window.__ag_zoom(0.25)" aria-label="Zoom In">➕</button>
-    </div>
-    <button class="ag-reset-btn" id="ag-reset-btn-{key_suffix}"
-            onclick="window.__ag_zoom_reset()" aria-label="Reset View">
-        🎯 Reset View
-    </button>
+    <style>
+    #ag-reset-only-btn {
+        display: none;
+        width: 100%; height: 38px;
+        border: 1px solid rgba(49,51,63,0.2);
+        background: #fff; color: #31333F;
+        border-radius: 6px; font-size: 14px; font-weight: 600;
+        cursor: pointer; touch-action: manipulation;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.07);
+        -webkit-tap-highlight-color: transparent;
+    }
+    #ag-reset-only-btn:active { background: #f0f2f6; }
+    </style>
+    <button id="ag-reset-only-btn" aria-label="Reset View">🎯 Reset View</button>
     """
-    _components.html(zoom_html, height=70, scrolling=False)
+    _components.html(reset_html, height=50, scrolling=False)
 
     if context_class:
         st.markdown('</div>', unsafe_allow_html=True)
