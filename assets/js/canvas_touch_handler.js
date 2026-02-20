@@ -40,20 +40,53 @@
     window.panY = 0;
     window.lastPinchDist = 0;
 
-    // 🛡️ SUPER-STRICT GESTURE INTERCEPTOR (Parent Level)
-    // We catch touchstart on the parent to block iframe click logic immediately
+    // 🤏 PINCH STATE SNAPSHOT (set on touchstart, used through the gesture)
+    window._pinch = {
+        active: false,
+        startDist: 0,
+        startZoom: 1.0,
+        startPanX: 0,
+        startPanY: 0,
+        // Midpoint in viewport px at gesture start
+        startMidViewX: 0,
+        startMidViewY: 0,
+        // Midpoint in viewport px at gesture start relative to wrapper
+        startMidRelX: 0,
+        startMidRelY: 0,
+    };
+    window._rafScheduled = false;
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 🛡️  SUPER-STRICT GESTURE INTERCEPTOR (Parent Level)
+    // ─────────────────────────────────────────────────────────────────────────
     if (!window.parent.__ANTIGRAVITY_TOUCH_HANDLERS_ATTACHED) {
         try {
+            // Snapshot gesture state on first touch so we have stable references
             window.parent.document.addEventListener('touchstart', e => {
-                if (e.touches.length > 1) {
+                if (e.touches.length === 2) {
                     window.isCanvasGesturing = true;
-                    window.lastPinchDist = Math.hypot(e.touches[1].clientX - e.touches[0].clientX, e.touches[1].clientY - e.touches[0].clientY);
-                    window.lastPinchCenter = { x: (e.touches[0].clientX + e.touches[1].clientX) / 2, y: (e.touches[0].clientY + e.touches[1].clientY) / 2 };
+                    const t1 = e.touches[0], t2 = e.touches[1];
+                    const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+                    const midX = (t1.clientX + t2.clientX) / 2;
+                    const midY = (t1.clientY + t2.clientY) / 2;
+
+                    // Snapshot for the anchor-zoom math used in touchmove
+                    window._pinch.active = true;
+                    window._pinch.startDist = dist;
+                    window._pinch.startZoom = window.userZoomLevel || 1.0;
+                    window._pinch.startPanX = window.panX || 0;
+                    window._pinch.startPanY = window.panY || 0;
+                    window._pinch.startMidViewX = midX;
+                    window._pinch.startMidViewY = midY;
+
+                    // Also store legacy fields used elsewhere
+                    window.lastPinchDist = dist;
+                    window.lastPinchCenter = { x: midX, y: midY };
                 }
             }, { capture: true, passive: true });
         } catch (e) { }
 
-        // Global tracker for strict multi-touch rules
+        // Global pointer-id tracker (used to guard single-finger editors)
         window.parent.document.addEventListener('pointerdown', e => window.activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY }), true);
         window.parent.document.addEventListener('pointerup', e => window.activePointers.delete(e.pointerId), true);
         window.parent.document.addEventListener('pointercancel', e => window.activePointers.delete(e.pointerId), true);
@@ -61,81 +94,178 @@
         window.parent.__ANTIGRAVITY_TOUCH_HANDLERS_ATTACHED = true;
     }
 
-    // Internal tracker for the overlay itself (fallback)
+    // Internal tracker for overlay elements (fallback)
     const trackPointer = (el) => {
         el.addEventListener('pointerdown', e => window.activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY }));
         el.addEventListener('pointerup', e => window.activePointers.delete(e.pointerId));
         el.addEventListener('pointercancel', e => window.activePointers.delete(e.pointerId));
     };
 
-
-    // 🤏 GLOBAL PINCH HANDLER
-    // 🤏 GLOBAL PINCH & PAN HANDLER (Custom JS)
-    // 🤏 GLOBAL PINCH & PAN HANDLER (Centric Zoom)
-    const handlePinch = (e) => {
-        if (e.touches.length === 2) {
-            window.isCanvasGesturing = true;
-
-            const t1 = e.touches[0];
-            const t2 = e.touches[1];
-
-            // Current Distance
-            const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
-
-            // Current Center
-            const cx = (t1.clientX + t2.clientX) / 2;
-            const cy = (t1.clientY + t2.clientY) / 2;
-
-            if (window.lastPinchDist > 0) {
-                // ZOOM CALCULATION
-                const delta = dist / window.lastPinchDist;
-                let newZoom = (window.userZoomLevel || 1.0) * delta;
-
-                // Safety Limits
-                if (newZoom < 0.5) newZoom = 0.5;   // Allow slight undershoot
-                if (newZoom > 8.0) newZoom = 8.0;   // Higher Max Zoom
-
-                window.userZoomLevel = newZoom;
-
-                // PAN CALCULATION (From Finger Movement)
-                if (window.lastPinchCenter && window.lastPinchCenter.x) {
-                    const dx = cx - window.lastPinchCenter.x;
-                    const dy = cy - window.lastPinchCenter.y;
-
-                    // Simple additive pan (1:1 movement)
-                    window.panX = (window.panX || 0) + dx;
-                    window.panY = (window.panY || 0) + dy;
-                }
-
-                applyResponsiveScale();
+    // ─────────────────────────────────────────────────────────────────────────
+    // 🤏  ANCHOR-CORRECT PINCH-ZOOM + PAN HANDLER
+    //
+    //  Math explanation:
+    //  Let W = CANVAS_WIDTH (intrinsic), H = CANVAS_HEIGHT.
+    //  The wrapper has visual size  wW = W * baseScale, wH = H * baseScale.
+    //  The canvas is placed at top:50% left:50% and pulled back by -50%/-50%,
+    //  then scaled by totalScale = baseScale * userZoom.
+    //  Its visual size is W * totalScale.  Its top-left corner in wrapper coords:
+    //    left =  wW/2 - (W*totalScale)/2  =  (wW - W*totalScale)/2
+    //  A touch at viewport.x maps to wrapper.x = viewport.x - wrapperRect.left.
+    //  For the zoom to be anchored at the midpoint pixel we need:
+    //    (mid_rel - pan_visual_offset) / oldZoom == (mid_rel - pan_visual_offset') / newZoom
+    //  Rearranging gives the new intrinsic pan:
+    //    panX' = panX + (mid_rel_x / baseScale) * (1/oldZoom - 1/newZoom)
+    // ─────────────────────────────────────────────────────────────────────────
+    const _getWrapper = () => {
+        const iframe = (() => {
+            const all = parent.document.querySelectorAll('iframe[title="streamlit_drawable_canvas.st_canvas"], iframe[src*="streamlit_drawable_canvas"]');
+            for (let i = all.length - 1; i >= 0; i--) {
+                const f = all[i];
+                if (!f.closest('[data-stale="true"]')) return f;
             }
+            return all[all.length - 1];
+        })();
+        return iframe ? iframe.parentElement : null;
+    };
 
-            // Update State
-            window.lastPinchDist = dist;
-            window.lastPinchCenter = { x: cx, y: cy };
-            window.lastPinchTime = Date.now();
+    const _scheduleFrame = () => {
+        if (window._rafScheduled) return;
+        window._rafScheduled = true;
+        requestAnimationFrame(() => {
+            window._rafScheduled = false;
+            applyResponsiveScale();
+        });
+    };
 
-            e.preventDefault();
-            e.stopPropagation();
+    const handlePinch = (e) => {
+        if (e.touches.length !== 2) return;
+        e.preventDefault();
+        e.stopPropagation();
+
+        window.isCanvasGesturing = true;
+
+        const t1 = e.touches[0], t2 = e.touches[1];
+        const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+        const midVX = (t1.clientX + t2.clientX) / 2;
+        const midVY = (t1.clientY + t2.clientY) / 2;
+
+        const p = window._pinch;
+        if (!p.active || p.startDist < 4) return;
+
+        // ── 1. New zoom level (clamped) ────────────────────────────────────
+        const scaleFactor = dist / p.startDist;
+        let newZoom = p.startZoom * scaleFactor;
+        newZoom = Math.max(0.5, Math.min(8.0, newZoom));
+
+        // ── 2. Compute wrapper-relative midpoint at gesture start ──────────
+        //  We need baseScale.  Derive it the same way applyResponsiveScale does.
+        const winW = (parent.window.visualViewport ? parent.window.visualViewport.width : parent.window.innerWidth) || parent.document.documentElement.clientWidth;
+        const CWIDTH = (window.CANVAS_CONFIG || {}).CANVAS_WIDTH || CANVAS_WIDTH;
+        const CHEIGHT = (window.CANVAS_CONFIG || {}).CANVAS_HEIGHT || CANVAS_HEIGHT;
+        const baseScale = winW < 1024
+            ? (winW - 4) / CWIDTH
+            : Math.min(
+                Math.min((winW - 60), 1200) / CWIDTH,
+                ((parent.window.visualViewport ? parent.window.visualViewport.height : parent.window.innerHeight) - 120) / CHEIGHT
+            );
+
+        const wrapper = _getWrapper();
+        if (!wrapper) return;
+        const wRect = wrapper.getBoundingClientRect();
+
+        // Midpoint relative to wrapper centre (in intrinsic canvas units)
+        //  wrapperCentreX = wRect.left + wRect.width/2  (visual)
+        //  midInWrapper (visual)  = midVX - wRect.left
+        //  midFromCentre (visual) = midInWrapper - wRect.width/2
+        //  midFromCentre (intrinsic) = midFromCentre_visual / (baseScale * startZoom)
+        // BUT we want the fixed anchor point in intrinsic coordinates:
+        //  anchorIntrinsic = (startMidFromCentre_visual / (baseScale * startZoom)) - startPan
+        //  That simplifies: for anchor zoom we just need the start midpoint relative to wrapper.
+
+        const startMidRelX = p.startMidViewX - wRect.left;  // px from wrapper left
+        const startMidRelY = p.startMidViewY - wRect.top;
+
+        // ── 3. Anchor-correct pan ─────────────────────────────────────────
+        //  In intrinsic coords, the midpoint = (midRel_visual / baseScale) - pan
+        //  is a fixed scene point.  After zoom changes from Z0→Z1:
+        //    panX1 = panX0 + midRelX_intrinsic * (1 - newZoom/oldZoom)
+        //  where midRelX_intrinsic = (startMidRelX / baseScale) - (wW_intrinsic/2) + panX0
+        //  but the wrapper width in intrinsic = CWIDTH (it is set = CWIDTH * baseScale visually).
+        //  Let midC_intr = startMidRelX/baseScale - CWIDTH/2  (from canvas centre)
+        //  Then anchoring gives:
+        //    panX1 = midC_intr - (midC_intr - panX0) * (newZoom / oldZoom)
+
+        const midC_X = startMidRelX / baseScale - CWIDTH / 2;  // from canvas centre, intrinsic
+        const midC_Y = startMidRelY / baseScale - CHEIGHT / 2;
+
+        let newPanX = midC_X - (midC_X - p.startPanX) * (newZoom / p.startZoom);
+        let newPanY = midC_Y - (midC_Y - p.startPanY) * (newZoom / p.startZoom);
+
+        // ── 4. Add finger-translation (two-finger pan) ────────────────────
+        const moveDX = (midVX - p.startMidViewX) / (baseScale * newZoom);
+        const moveDY = (midVY - p.startMidViewY) / (baseScale * newZoom);
+        newPanX += moveDX;
+        newPanY += moveDY;
+
+        // ── 5. Clamp pan so image never exposes white space ───────────────
+        const limitX = (CWIDTH * (newZoom - 1)) / (2 * newZoom);
+        const limitY = (CHEIGHT * (newZoom - 1)) / (2 * newZoom);
+        newPanX = Math.max(-limitX, Math.min(limitX, newPanX));
+        newPanY = Math.max(-limitY, Math.min(limitY, newPanY));
+
+        // ── 6. Commit to global state and schedule DOM update ─────────────
+        window.userZoomLevel = newZoom;
+        window.panX = newPanX;
+        window.panY = newPanY;
+        window.lastPinchDist = dist;
+        window.lastPinchCenter = { x: midVX, y: midVY };
+        window.lastPinchTime = Date.now();
+
+        _scheduleFrame();
+    };
+
+    const handlePinchEnd = (e) => {
+        if (e.touches.length < 2) {
+            window.lastPinchDist = 0;
+            window._pinch.active = false;
+            // Keep isCanvasGesturing true briefly so editors don't misfire
+            setTimeout(() => { window.isCanvasGesturing = false; }, 350);
         }
     };
 
-    // Attach to parent to catch events before they hit iframe
+    // ── Helper: snapshot pinch state (called from touchstart on any context) ──
+    const _snapshotPinch = (t1, t2) => {
+        const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+        const midX = (t1.clientX + t2.clientX) / 2;
+        const midY = (t1.clientY + t2.clientY) / 2;
+        window.isCanvasGesturing = true;
+        window._pinch.active = true;
+        window._pinch.startDist = dist;
+        window._pinch.startZoom = window.userZoomLevel || 1.0;
+        window._pinch.startPanX = window.panX || 0;
+        window._pinch.startPanY = window.panY || 0;
+        window._pinch.startMidViewX = midX;
+        window._pinch.startMidViewY = midY;
+        window.lastPinchDist = dist;
+        window.lastPinchCenter = { x: midX, y: midY };
+    };
+
+    // Local window touchstart — fires even when parent guard is already set
+    window.addEventListener('touchstart', e => {
+        if (e.touches.length === 2) _snapshotPinch(e.touches[0], e.touches[1]);
+    }, { capture: true, passive: true });
+
+    // Attach to parent document to intercept events before iframes see them
     try {
         window.parent.document.addEventListener('touchmove', handlePinch, { capture: true, passive: false });
-        window.parent.document.addEventListener('touchend', e => {
-            if (e.touches.length < 2) {
-                window.lastPinchDist = 0;
-                setTimeout(() => window.isCanvasGesturing = false, 300);
-            }
-        }, { capture: true });
+        window.parent.document.addEventListener('touchend', handlePinchEnd, { capture: true, passive: true });
+        window.parent.document.addEventListener('touchcancel', handlePinchEnd, { capture: true, passive: true });
 
-        // Also attach to local window just in case
+        // Local window fallback
         window.addEventListener('touchmove', handlePinch, { capture: true, passive: false });
-        window.addEventListener('touchend', e => {
-            if (e.touches.length < 2) window.lastPinchDist = 0;
-        }, { capture: true });
-
+        window.addEventListener('touchend', handlePinchEnd, { capture: true, passive: true });
+        window.addEventListener('touchcancel', handlePinchEnd, { capture: true, passive: true });
     } catch (e) { }
 
     // Config Check
@@ -563,7 +693,10 @@
     }
 
     function applyResponsiveScale() {
-        if (window.isCanvasGesturing) return;
+        // NOTE: We deliberately do NOT skip when isCanvasGesturing — the pinch
+        // handler calls _scheduleFrame() which calls us, so we MUST run during
+        // a gesture to see smooth zooming.  isCanvasGesturing is only used by
+        // editors to block accidental single-tap draws.
         try {
             const iframes = parent.document.getElementsByTagName('iframe');
             if (!iframes.length) return;
