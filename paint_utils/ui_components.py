@@ -1758,8 +1758,7 @@ def render_sidebar(sam, device_str):
                     "**OFF:** Normal colour mode."
                 ),
             )
-            if st.session_state.get("grayscale_mode"):
-                st.caption("🖤 Grayscale mode active — painted areas show in colour")
+
             st.markdown('<div class="sidebar-divider"></div>', unsafe_allow_html=True)
 
 
