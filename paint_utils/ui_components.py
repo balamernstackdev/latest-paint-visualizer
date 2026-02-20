@@ -15,8 +15,11 @@ from PIL import Image
 from streamlit_drawable_canvas import st_canvas as raw_st_canvas
 from streamlit_image_comparison import image_comparison
 from .encoding import image_to_url_patch
-from .state_manager import cb_undo, cb_redo, cb_clear_all, cb_delete_layer, cb_apply_pending, cb_cancel_pending
-from .image_processing import get_crop_params, composite_image, process_lasso_path
+from .state_manager import cb_undo, cb_redo, cb_clear_all, cb_delete_layer, cb_apply_pending, cb_cancel_pending, preserve_sidebar_state
+from .image_processing import (
+    get_crop_params, composite_image, process_lasso_path,
+    get_display_base_image, to_grayscale_rgb
+)
 from .sam_loader import get_sam_engine, CHECKPOINT_PATH, MODEL_TYPE
 from .performance import cleanup_session_caches
 
@@ -33,6 +36,7 @@ TOOL_MAPPING = {
 # --- HELPERS ---
 def safe_rerun(scope="fragment"):
     """Prevents StreamlitAPIException during full-rerun transitions."""
+    preserve_sidebar_state()
     try:
         st.rerun(scope=scope)
     except:
@@ -748,19 +752,35 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                 if st.button("🗑️ CANCEL", use_container_width=True, key="top_frag_cancel"):
                     cb_cancel_pending(); safe_rerun()
 
-    original_img = st.session_state["image"]
+    # 1️⃣ Enforce Mode-First Rendering (BEFORE any paint logic)
+    gray_mode = st.session_state.get("grayscale_mode", False)
+    if gray_mode:
+        if "image_gray" not in st.session_state or st.session_state["image_gray"] is None:
+            from paint_utils.image_processing import to_grayscale_rgb
+            st.session_state["image_gray"] = to_grayscale_rgb(st.session_state["image"])
+        base_image = st.session_state["image_gray"]
+    else:
+        base_image = st.session_state["image"]
+
+    original_img = st.session_state["image"]   # always the color original
     
     # 🛑 OVERRIDE: Enforce Full-Image Rendering to support smooth Client-Side Zoom
-    # We ignore the passed server-side crop params (start_x, view_w, etc) and render the full image.
     pass
     start_x, start_y = 0, 0
     view_w, view_h = w, h
     scale_factor = display_width / w if w > 0 else 1.0
     
-    painted_img = composite_image(original_img, st.session_state["masks"])
+    # 3️⃣ Apply paint layers onto the strictly selected base_image
+    # The native ColorTransferEngine correctly maps color over grayscale.
+    from paint_utils.image_processing import composite_image
+    painted_img = composite_image(base_image, st.session_state["masks"])
     show_comp = st.session_state.get("show_comparison", False)
     
-    display_img = original_img if show_comp else painted_img
+    # In compare mode show base (gray or color), else painted
+    if show_comp:
+        display_img = base_image
+    else:
+        display_img = painted_img
     # Use full image (no cropping)
     cropped_view = display_img
     new_h = int(h * (display_width / w))
@@ -811,9 +831,8 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
 
                     # Validate size
                     if abs(final_box[2] - final_box[0]) > 5 and abs(final_box[3] - final_box[1]) > 5:
-                        if not getattr(sam, "is_image_set", False): 
-                            with st.spinner("🧠 AI is analyzing image..."):
-                                sam.set_image(st.session_state["image"])
+                        with st.spinner("🧠 AI is analyzing image..."):
+                            sam.set_image(st.session_state["image"])
                             
                         mask = sam.generate_mask(
                             box_coords=final_box, 
@@ -965,7 +984,7 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                         click_key = f"{real_x}_{real_y}_{st.session_state['picked_color']}"
                         if click_key != st.session_state.get("last_click_global"):
                             st.session_state["last_click_global"] = click_key
-                            if not getattr(sam, "is_image_set", False): sam.set_image(st.session_state["image"])
+                            sam.set_image(st.session_state["image"])
                             current_tool = st.session_state.get("selection_tool", "")
                             is_wall_click_mode = "Wall Click" in current_tool
                             mask = sam.generate_mask(
@@ -1012,8 +1031,7 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                                     box = [min(x_coords), min(y_coords), max(x_coords), max(y_coords)]
                                     # Ensure minimal box size
                                     if (box[2]-box[0]) > 5 and (box[3]-box[1]) > 5:
-                                        if not getattr(sam, "is_image_set", False): 
-                                            sam.set_image(st.session_state["image"])
+                                        sam.set_image(st.session_state["image"])
                                         current_tool = st.session_state.get("selection_tool", "")
                                         is_wall_click_mode = "Wall Click" in current_tool
                                         mask = sam.generate_mask(
@@ -1392,8 +1410,20 @@ def render_visualizer_engine_v11(display_width):
     if st.session_state.get("show_comparison", False):
         st.markdown("### 👁️ Comparison: Before vs After")
         c1, c2 = st.columns(2)
-        with c1: st.image(st.session_state["image"], caption="Original", use_container_width=True)
-        with c2: st.image(composite_image(st.session_state["image"], st.session_state["masks"]), caption="Painted", use_container_width=True)
+        
+        # Mode-First Check
+        gray_mode = st.session_state.get("grayscale_mode", False)
+        if gray_mode:
+            if "image_gray" not in st.session_state or st.session_state["image_gray"] is None:
+                from paint_utils.image_processing import to_grayscale_rgb
+                st.session_state["image_gray"] = to_grayscale_rgb(st.session_state["image"])
+            base_image = st.session_state["image_gray"]
+        else:
+            base_image = st.session_state["image"]
+
+        from paint_utils.image_processing import composite_image
+        with c1: st.image(base_image, caption="Original", use_container_width=True)
+        with c2: st.image(composite_image(base_image, st.session_state["masks"]), caption="Painted", use_container_width=True)
         st.divider()
 
     # 3. THE CANVAS (Isolated fragment)
@@ -1459,6 +1489,7 @@ def render_sidebar(sam, device_str):
              if is_image_loaded:
                   if st.button("️ Reset Project / Clear All", use_container_width=True):
                     st.session_state["image"] = None
+                    st.session_state["image_gray"] = None
                     st.session_state["image_path"] = None
                     st.session_state["masks"] = []
                     for k in list(st.session_state.keys()):
@@ -1468,11 +1499,14 @@ def render_sidebar(sam, device_str):
                     st.session_state["composited_cache"] = None
                     st.cache_data.clear()
                     st.session_state["uploader_id"] += 1 
+                    preserve_sidebar_state()
                     safe_rerun()
         
         if uploaded_file is not None:
+            # We enforce reprocessing if the file_key changes OR if `image` state is None 
+            # (which happens if they wiped out state but Streamlit kept the uploaded_file instance natively)
             file_key = getattr(uploaded_file, "file_id", f"{uploaded_file.name}_{uploaded_file.size}")
-            if st.session_state.get("image_path") != file_key:
+            if st.session_state.get("image_path") != file_key or st.session_state.get("image") is None:
                 st.toast(f"📸 Loading New Image: {uploaded_file.name}", icon="🔄")
                 uploaded_file.seek(0)
                 file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
@@ -1485,10 +1519,11 @@ def render_sidebar(sam, device_str):
                     scale = max_dim / max(h, w)
                     image = cv2.resize(image, (int(w*scale), int(h*scale)), interpolation=cv2.INTER_AREA)
                 st.session_state["image"] = image
+                st.session_state["image_gray"] = None
                 st.session_state["image_path"] = file_key
                 st.session_state["masks"] = []
-                st.session_state["pending_selection"] = None # 🎯 Reset pending selections
-                st.session_state["pending_boxes"] = []      # 🎯 Reset pending boxes
+                st.session_state["pending_selection"] = None
+                st.session_state["pending_boxes"] = []
                 st.session_state["last_click_global"] = None
                 st.session_state["zoom_level"] = 1.0
                 st.session_state["pan_x"] = 0.5
@@ -1496,13 +1531,14 @@ def render_sidebar(sam, device_str):
                 st.session_state["render_id"] = 0
                 st.session_state["canvas_id"] = st.session_state.get("canvas_id", 0) + 1
                 
-                # 🧹 Targeted cache cleanup (faster than global clear)
+                # Force invalidate SAM Engine states to prevent phantom "old image" masks
+                sam.is_image_set = False
+                
+                # 🧹 Targeted cache cleanup
+                from paint_utils.performance import cleanup_session_caches
                 cleanup_session_caches(aggressive=True)
                 
-                # 🚀 PERFORMANCE FIX: We removed sam.set_image(image) here.
-                # The engine will now be primed asynchronously on the first tool interaction.
-                # This eliminates the "Running..." freeze after uploading an image.
-                
+                preserve_sidebar_state()
                 st.rerun()
         
         # Auto-reset logic REMOVED to prevent accidental clearing during reruns.
@@ -1517,7 +1553,10 @@ def render_sidebar(sam, device_str):
 
         if st.session_state.get("image") is not None:
             if st.session_state["masks"]:
-                if st.button("💎 PREPARE HIGH-RES DOWNLOAD", use_container_width=True, type="primary"):
+                _gray_mode = st.session_state.get("grayscale_mode", False)
+                _dl_label = "💎 PREPARE HIGH-RES DOWNLOAD" + (" (Grayscale)" if _gray_mode else "")
+                _dl_filename = "visualizer_grayscale_design.png" if _gray_mode else "pro_visualizer_design.png"
+                if st.button(_dl_label, use_container_width=True, type="primary"):
                     st.toast("🎨 Professional Rendering in Progress...", icon="💎")
                     try:
                         original_img = st.session_state["image_original"]
@@ -1547,7 +1586,15 @@ def render_sidebar(sam, device_str):
                             high_res_masks.append(hr_m)
                         progress_bar.empty()
                         from paint_core.colorizer import ColorTransferEngine
-                        dl_comp = ColorTransferEngine.composite_multiple_layers(original_img, high_res_masks)
+                        
+                        if st.session_state.get("grayscale_mode", False):
+                            from paint_utils.image_processing import to_grayscale_rgb
+                            base_dl_img = to_grayscale_rgb(original_img)
+                        else:
+                            base_dl_img = original_img
+
+                        from paint_utils.image_processing import composite_image
+                        dl_comp = composite_image(base_dl_img, high_res_masks)
                         dl_pil = Image.fromarray(dl_comp)
                         dl_buf = io.BytesIO()
                         dl_pil.save(dl_buf, format="PNG")
@@ -1559,7 +1606,8 @@ def render_sidebar(sam, device_str):
                         logging.error(f"High-res export failed: {e}", exc_info=True)
 
                 if st.session_state.get("last_export"):
-                    st.download_button(label="📥 Save Final Image", data=st.session_state["last_export"], file_name="pro_visualizer_design.png", mime="image/png", use_container_width=True)
+                    _dl_fn = "visualizer_grayscale_design.png" if st.session_state.get("grayscale_mode") else "pro_visualizer_design.png"
+                    st.download_button(label="📥 Save Final Image", data=st.session_state["last_export"], file_name=_dl_fn, mime="image/png", use_container_width=True)
             
             
             st.markdown('<div class="sidebar-header-text">🛠️ Selection Tool</div>', unsafe_allow_html=True)
@@ -1691,7 +1739,29 @@ def render_sidebar(sam, device_str):
             
             st.markdown('<div class="sidebar-header-text">👁️ View Settings</div>', unsafe_allow_html=True)
             st.toggle("Compare Before/After", key="show_comparison")
+
+            # ── Grayscale Preview Mode ──────────────────────────────────────
+            def _on_gray_toggle():
+                """Invalidate compositor cache so canvas re-renders in new mode."""
+                st.session_state["comp_cache_state"] = None
+                st.session_state["comp_cache_len"] = 0
+                st.session_state["render_id"] += 1
+
+            st.toggle(
+                "🎨 Grayscale Preview Mode",
+                key="grayscale_mode",
+                on_change=_on_gray_toggle,
+                help=(
+                    "**ON:** Display image in grayscale. Paint colors appear only "
+                    "on the areas you have painted — the rest stays gray. Download "
+                    "also exports a grayscale + color result.\n\n"
+                    "**OFF:** Normal colour mode."
+                ),
+            )
+            if st.session_state.get("grayscale_mode"):
+                st.caption("🖤 Grayscale mode active — painted areas show in colour")
             st.markdown('<div class="sidebar-divider"></div>', unsafe_allow_html=True)
+
 
             sidebar_paint_fragment()
             st.markdown('<div class="sidebar-divider"></div>', unsafe_allow_html=True)
@@ -1724,7 +1794,16 @@ def render_comparison_slider():
     if st.session_state.get('image') is None:
         return
 
-    original_img = st.session_state['image']
+    gray_mode = st.session_state.get("grayscale_mode", False)
+    if gray_mode:
+        if "image_gray" not in st.session_state or st.session_state["image_gray"] is None:
+            from paint_utils.image_processing import to_grayscale_rgb
+            st.session_state["image_gray"] = to_grayscale_rgb(st.session_state["image"])
+        base_image = st.session_state["image_gray"]
+    else:
+        base_image = st.session_state["image"]
+
+    original_img = base_image
     painted_img = composite_image(original_img, st.session_state['masks'])
     
     # Convert RGB to BGR for comparison component (if needed) or keep RGB

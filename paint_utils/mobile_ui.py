@@ -1,6 +1,6 @@
 import streamlit as st
 from .ui_components import TOOL_MAPPING
-from .state_manager import cb_undo, cb_redo, cb_apply_pending, cb_cancel_pending
+from .state_manager import cb_undo, cb_redo, cb_apply_pending, cb_cancel_pending, preserve_sidebar_state
 
 def render_mobile_toolbar():
     """
@@ -101,28 +101,33 @@ def render_mobile_toolbar():
             # Tool Switcher
             if st.button("👆", key="mob_tool_click", help="Point Click", use_container_width=True):
                 st.session_state["selection_tool"] = TOOL_MAPPING["👆"]
+                preserve_sidebar_state()
                 st.rerun()
                 
         with cols[1]:
             if st.button("✨", key="mob_tool_box", help="Box/Object", use_container_width=True):
                 st.session_state["selection_tool"] = TOOL_MAPPING["✨"]
+                preserve_sidebar_state()
                 st.rerun()
                 
         with cols[2]:
              if st.button("✏️", key="mob_tool_brush", help="Brush", use_container_width=True):
                 st.session_state["selection_tool"] = TOOL_MAPPING["✏️"]
+                preserve_sidebar_state()
                 st.rerun()
 
         with cols[3]:
             # Undo
             if st.button("↩️", key="mob_undo", use_container_width=True):
                 cb_undo()
+                preserve_sidebar_state()
                 st.rerun()
                 
         with cols[4]:
             # Apply
              if st.button("✅", key="mob_apply", type="primary", use_container_width=True):
                  cb_apply_pending()
+                 preserve_sidebar_state()
                  st.rerun()
 
     # CSS to force this container to bottom

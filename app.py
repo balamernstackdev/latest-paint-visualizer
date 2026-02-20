@@ -105,6 +105,8 @@ def main():
             with st.spinner("🧠 AI is thinking..."):
                 import time
                 time.sleep(0.1)
+                from paint_utils.state_manager import preserve_sidebar_state
+                preserve_sidebar_state()
                 st.rerun()
         
         elif isinstance(async_status, dict) and async_status.get("status") == "success":
@@ -164,11 +166,15 @@ def main():
             
             # Clear Param
             if "box" in st.query_params: st.query_params.pop("box", None)
+            from paint_utils.state_manager import preserve_sidebar_state
+            preserve_sidebar_state()
             st.rerun()
 
         elif isinstance(async_status, dict) and async_status.get("status") == "error":
              st.error(f"AI Error: {async_status.get('message')}")
              if "box" in st.query_params: st.query_params.pop("box", None)
+             from paint_utils.state_manager import preserve_sidebar_state
+             preserve_sidebar_state()
              st.rerun()
              
         else:
@@ -239,6 +245,8 @@ def main():
                               st.toast("⚠️ No object detected.", icon="🤷‍♂️")
                          
                          if "box" in st.query_params: st.query_params.pop("box", None)
+                         from paint_utils.state_manager import preserve_sidebar_state
+                         preserve_sidebar_state()
                          st.rerun()
                     else:
                         # FALLBACK -> Async Worker
@@ -288,10 +296,14 @@ def main():
                     st.session_state["render_id"] += 1
                 
                 if "tap" in st.query_params: st.query_params.pop("tap", None)
+                from paint_utils.state_manager import preserve_sidebar_state
+                preserve_sidebar_state()
                 st.rerun()
             except Exception as e:
                 print(f"DEBUG: Wand Error: {e}")
                 if "tap" in st.query_params: st.query_params.pop("tap", None)
+                from paint_utils.state_manager import preserve_sidebar_state
+                preserve_sidebar_state()
                 st.rerun()
         
         # --- AI POINT HANDLER ---
@@ -305,7 +317,8 @@ def main():
             with st.status("👆 AI is analyzing object...", expanded=False):
                 st.write("Detecting boundaries...")
                 import time
-                time.sleep(0.05)
+                from paint_utils.state_manager import preserve_sidebar_state
+                preserve_sidebar_state()
                 st.rerun()
 
         elif isinstance(async_status, dict) and async_status.get("status") == "success":
@@ -343,11 +356,15 @@ def main():
                 
              # Clear Param
              if "tap" in st.query_params: st.query_params.pop("tap", None)
+             from paint_utils.state_manager import preserve_sidebar_state
+             preserve_sidebar_state()
              st.rerun()
         
         elif isinstance(async_status, dict) and async_status.get("status") == "error":
              st.error(f"Tap Error: {async_status.get('message')}")
              if "tap" in st.query_params: st.query_params.pop("tap", None)
+             from paint_utils.state_manager import preserve_sidebar_state
+             preserve_sidebar_state()
              st.rerun()
 
         else:
@@ -394,6 +411,8 @@ def main():
                             st.session_state["render_id"] += 1
                         
                         if "tap" in st.query_params: st.query_params.pop("tap", None)
+                        from paint_utils.state_manager import preserve_sidebar_state
+                        preserve_sidebar_state()
                         st.rerun()
 
                     else:
@@ -548,6 +567,8 @@ def main():
 
         if "poly_pts" in st.query_params:
              st.query_params.pop("poly_pts", None)
+        from paint_utils.state_manager import preserve_sidebar_state
+        preserve_sidebar_state()
         st.rerun()
             
     # --- 4️⃣ RENDER IMAGE ---

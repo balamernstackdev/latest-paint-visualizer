@@ -79,6 +79,8 @@ def submit_sam_task(sam_engine, image, prompt_type, prompt_data):
     }
     
     # Trigger immediate rerun to show spinner
+    from paint_utils.state_manager import preserve_sidebar_state
+    preserve_sidebar_state()
     st.rerun()
 
 def check_async_task():

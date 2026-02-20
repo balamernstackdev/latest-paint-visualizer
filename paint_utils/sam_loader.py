@@ -100,6 +100,8 @@ def ensure_model_exists():
                 status.update(label="✅ Model weights verified!", state="complete")
                 time.sleep(1)
                 st.cache_resource.clear()
+                from paint_utils.state_manager import preserve_sidebar_state
+                preserve_sidebar_state()
                 st.rerun() 
             except Exception as e:
                 status.update(label=f"❌ Failed to download model: {e}", state="error")

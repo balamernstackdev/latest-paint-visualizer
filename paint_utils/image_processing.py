@@ -125,3 +125,155 @@ def magic_wand_selection(image, seed_point, tolerance=10):
         print(f'Magic Wand Error: {e}')
         return None
 
+
+def to_grayscale_rgb(image_rgb):
+    """Convert an RGB image to grayscale, returned as a 3-channel RGB array.
+    
+    This keeps the image in RGB format so it works seamlessly with all
+    downstream rendering code that expects an (H, W, 3) array.
+    
+    Args:
+        image_rgb: NumPy array (H, W, 3) in RGB format
+        
+    Returns:
+        NumPy array (H, W, 3) — grayscale values repeated across all 3 channels
+    """
+    gray = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2GRAY)
+    return cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
+
+
+def get_display_base_image(image_rgb):
+    """Return the current base image respecting Grayscale Preview Mode.
+    
+    When grayscale_mode is ON: returns grayscale version of the image.
+    When grayscale_mode is OFF: returns original RGB image unchanged.
+    
+    Never modifies the original image in session state.
+    
+    Args:
+        image_rgb: Source RGB image from session_state["image"]
+        
+    Returns:
+        NumPy array (H, W, 3) in RGB format
+    """
+    if st.session_state.get("grayscale_mode", False):
+        return to_grayscale_rgb(image_rgb)
+    return image_rgb
+
+
+def composite_image_grayscale_aware(original_rgb, masks_data):
+    """composite_image variant that honours Grayscale Preview Mode.
+    
+    In NORMAL mode:
+        Behaves identically to composite_image().
+    
+    In GRAYSCALE mode:
+        - Starts from a grayscale base
+        - Applies color ONLY inside each painted mask (rest stays gray)
+        - This creates the signature "color pops on grayscale" look
+    
+    Args:
+        original_rgb: The color source image (always the original color photo)
+        masks_data: List of mask layer dicts (same format as composite_image)
+    
+    Returns:
+        NumPy array (H, W, 3) in RGB format
+    """
+    from paint_core.colorizer import ColorTransferEngine
+    from scipy import sparse as _sparse
+
+    gray_mode = st.session_state.get("grayscale_mode", False)
+
+    if not gray_mode:
+        # Normal path — delegate to existing fast compositor
+        from paint_utils.image_processing import composite_image
+        return composite_image(original_rgb, masks_data)
+
+    # ── Grayscale-mode path ──────────────────────────────────────────────
+    # 1. Build grayscale base
+    gray_base = to_grayscale_rgb(original_rgb)
+    h, w = gray_base.shape[:2]
+
+    # Start with gray canvas
+    result = gray_base.copy().astype(np.float32) / 255.0
+
+    # 2. For each visible layer: composite color ONLY inside the mask
+    for layer in masks_data:
+        if not layer.get("visible", True):
+            continue
+        mask = layer["mask"]
+        if _sparse.issparse(mask):
+            mask = mask.toarray()
+        color_hex = layer.get("color", "#FFFFFF")
+        opacity = layer.get("opacity", 1.0)
+
+        # Resize mask if needed
+        if mask.shape[:2] != (h, w):
+            mask = cv2.resize(mask.astype(np.uint8), (w, h), interpolation=cv2.INTER_NEAREST) > 0
+        else:
+            mask = mask > 0
+
+        if not mask.any():
+            continue
+
+        # Build a fully-colored version of the ORIGINAL image under this mask
+        # Use the same LAB recolor as the main engine for consistency
+        try:
+            r, g, b = ColorTransferEngine.hex_to_rgb(color_hex)
+            target_a, target_b = ColorTransferEngine.get_target_ab(color_hex)
+
+            orig_f = original_rgb.astype(np.float32) / 255.0
+            orig_lab = cv2.cvtColor(orig_f, cv2.COLOR_RGB2Lab)
+            L, A, B = cv2.split(orig_lab)
+
+            new_A = np.full_like(A, target_a)
+            new_B = np.full_like(B, target_b)
+            colored_lab = cv2.merge([L, new_A, new_B])
+            colored_rgb = cv2.cvtColor(colored_lab, cv2.COLOR_Lab2RGB)  # float32 0-1
+        except Exception:
+            colored_rgb = result.copy()
+
+        # Soft mask for feathered edges
+        mask_f = mask.astype(np.float32)
+        softness = layer.get("softness", 0)
+        if softness > 0:
+            k = softness * 4 + 1
+            mask_f = cv2.GaussianBlur(mask_f, (k, k), 0)
+        else:
+            mask_f = cv2.GaussianBlur(mask_f, (3, 3), 0)
+
+        mask_3ch = np.stack([mask_f] * 3, axis=-1) * opacity
+
+        # Blend colored pixels over gray only inside mask
+        result = result * (1.0 - mask_3ch) + colored_rgb * mask_3ch
+
+    # 3. Pending selection highlight (same as normal mode)
+    try:
+        pending = st.session_state.get("pending_selection")
+        if pending is not None:
+            pmask = pending["mask"]
+            if _sparse.issparse(pmask):
+                pmask = pmask.toarray()
+            pc = st.session_state.get("picked_color", "#3B82F6")
+            try:
+                c_rgb = tuple(int(pc.lstrip("#")[i:i+2], 16) / 255.0 for i in (0, 2, 4))
+                highlight = np.array(c_rgb, dtype=np.float32)
+            except:
+                highlight = np.array([0.23, 0.51, 0.96], dtype=np.float32)
+
+            if pmask.shape[:2] != (h, w):
+                pmask = cv2.resize(pmask.astype(np.uint8), (w, h), interpolation=cv2.INTER_NEAREST) > 0
+            else:
+                pmask = pmask > 0
+
+            if pmask.any():
+                result_copy = result.copy()
+                result_copy[pmask] = (
+                    result_copy[pmask] * 0.5 + highlight * 0.5
+                )
+                result = result_copy
+    except Exception:
+        pass
+
+    return np.clip(result * 255.0, 0, 255).astype(np.uint8)
+

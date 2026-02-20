@@ -32,11 +32,36 @@ def initialize_session_state():
         "sidebar_p_open": False,
         "last_export": None,
         "selected_layer_idx": None,
-        "loop_guarded": False
+        "loop_guarded": False,
+        "grayscale_mode": False,     # 🎨 Grayscale Preview Mode
     }
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
+            
+    # Restore any states saved before a rerun abort
+    restore_sidebar_state()
+
+SIDEBAR_KEYS = [
+    "selection_tool", "selection_op", "picked_color", 
+    "grayscale_mode", "is_wall_only", "mask_level", 
+    "selection_softness", "selection_refinement",
+    "selection_highlight_opacity", "fill_selection", "lasso_thickness",
+    "selection_finish" 
+]
+
+def preserve_sidebar_state():
+    """Preserve Streamlit widget states before an abortive rerun."""
+    for key in SIDEBAR_KEYS:
+        if key in st.session_state:
+            st.session_state[f"_saved_{key}"] = st.session_state[key]
+
+def restore_sidebar_state():
+    """Restore preserved widget states at the start of a run."""
+    for key in SIDEBAR_KEYS:
+        if f"_saved_{key}" in st.session_state:
+            st.session_state[key] = st.session_state[f"_saved_{key}"]
+            del st.session_state[f"_saved_{key}"]
 
 def cb_apply_pending(increment_canvas=True, silent=False):
     if st.session_state.get("pending_selection") is not None:

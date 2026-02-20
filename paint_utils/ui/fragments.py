@@ -94,7 +94,8 @@ def render_zoom_controls(key_suffix="", context_class=""):
     
     with z_col2:
         if st.button("➖", help="Zoom Out", use_container_width=True, key=f"zoom_out_{key_suffix}"):
-            update_zoom(-0.2)
+            from ..state_manager import preserve_sidebar_state
+            preserve_sidebar_state()
             st.rerun()
             
     with z_col3:
@@ -109,7 +110,8 @@ def render_zoom_controls(key_suffix="", context_class=""):
             
     with z_col4:
         if st.button("➕", help="Zoom In", use_container_width=True, key=f"zoom_in_{key_suffix}"):
-            update_zoom(0.2)
+            from ..state_manager import preserve_sidebar_state
+            preserve_sidebar_state()
             st.rerun()
 
     # Show reset button only when zoom or pan is active
@@ -123,6 +125,8 @@ def render_zoom_controls(key_suffix="", context_class=""):
             st.session_state["pan_y"] = 0.5
             st.session_state["render_id"] += 1
             st.session_state["canvas_id"] = st.session_state.get("canvas_id", 0) + 1
+            from ..state_manager import preserve_sidebar_state
+            preserve_sidebar_state()
             st.rerun()
             
     if context_class:
