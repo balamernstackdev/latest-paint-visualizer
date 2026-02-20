@@ -165,14 +165,13 @@ def main():
                  st.toast("⚠️ No object detected.", icon="🤷‍♂️")
             
             # Clear Param
-            if "box" in st.query_params: st.query_params.pop("box", None)
-            from paint_utils.state_manager import preserve_sidebar_state
-            preserve_sidebar_state()
-            st.rerun()
+            if "box" in st.query_params: 
+                del st.query_params["box"]
 
         elif isinstance(async_status, dict) and async_status.get("status") == "error":
              st.error(f"AI Error: {async_status.get('message')}")
-             if "box" in st.query_params: st.query_params.pop("box", None)
+             if "box" in st.query_params: 
+                 del st.query_params["box"]
              from paint_utils.state_manager import preserve_sidebar_state
              preserve_sidebar_state()
              st.rerun()
@@ -244,10 +243,8 @@ def main():
                          else:
                               st.toast("⚠️ No object detected.", icon="🤷‍♂️")
                          
-                         if "box" in st.query_params: st.query_params.pop("box", None)
-                         from paint_utils.state_manager import preserve_sidebar_state
-                         preserve_sidebar_state()
-                         st.rerun()
+                         if "box" in st.query_params: 
+                              del st.query_params["box"]
                     else:
                         # FALLBACK -> Async Worker
                         submit_sam_task(
@@ -263,7 +260,8 @@ def main():
                         st.session_state["async_task_pending"] = True
             except Exception as e:
                 print(f"DEBUG: Box Parse Error: {e}")
-                if "box" in st.query_params: st.query_params.pop("box", None)
+                if "box" in st.query_params: 
+                    del st.query_params["box"]
 
     # --- 2c️⃣ CAPTURE & PROCESS TAP PARAM (AI / WAND) ---
     tap_param = q_params.get("tap", None)
@@ -295,16 +293,12 @@ def main():
                     cb_apply_pending(increment_canvas=False, silent=True)
                     st.session_state["render_id"] += 1
                 
-                if "tap" in st.query_params: st.query_params.pop("tap", None)
-                from paint_utils.state_manager import preserve_sidebar_state
-                preserve_sidebar_state()
-                st.rerun()
+                if "tap" in st.query_params: 
+                    del st.query_params["tap"]
             except Exception as e:
                 print(f"DEBUG: Wand Error: {e}")
-                if "tap" in st.query_params: st.query_params.pop("tap", None)
-                from paint_utils.state_manager import preserve_sidebar_state
-                preserve_sidebar_state()
-                st.rerun()
+                if "tap" in st.query_params: 
+                    del st.query_params["tap"]
         
         # --- AI POINT HANDLER ---
         print(f"DEBUG: Processing Mobile Tap (AI) -> {tap_param}")
@@ -355,14 +349,13 @@ def main():
                 st.session_state["render_id"] += 1
                 
              # Clear Param
-             if "tap" in st.query_params: st.query_params.pop("tap", None)
-             from paint_utils.state_manager import preserve_sidebar_state
-             preserve_sidebar_state()
-             st.rerun()
+             if "tap" in st.query_params: 
+                 del st.query_params["tap"]
         
         elif isinstance(async_status, dict) and async_status.get("status") == "error":
              st.error(f"Tap Error: {async_status.get('message')}")
-             if "tap" in st.query_params: st.query_params.pop("tap", None)
+             if "tap" in st.query_params: 
+                 del st.query_params["tap"]
              from paint_utils.state_manager import preserve_sidebar_state
              preserve_sidebar_state()
              st.rerun()
@@ -410,10 +403,8 @@ def main():
                             cb_apply_pending(increment_canvas=False, silent=True)
                             st.session_state["render_id"] += 1
                         
-                        if "tap" in st.query_params: st.query_params.pop("tap", None)
-                        from paint_utils.state_manager import preserve_sidebar_state
-                        preserve_sidebar_state()
-                        st.rerun()
+                        if "tap" in st.query_params: 
+                            del st.query_params["tap"]
 
                     else:
                         # FALLBACK -> Async Worker
@@ -429,7 +420,8 @@ def main():
                         )
             except Exception as e:
                 print(f"DEBUG: Tap Setup Error: {e}")
-                if "tap" in st.query_params: st.query_params.pop("tap", None)
+                if "tap" in st.query_params: 
+                    del st.query_params["tap"]
 
     # --- 2b️⃣ CAPTURE POLY PARAM IMMEDIATELY ---
     poly_param = q_params.get("poly_pts", None)
@@ -566,10 +558,7 @@ def main():
             traceback.print_exc()
 
         if "poly_pts" in st.query_params:
-             st.query_params.pop("poly_pts", None)
-        from paint_utils.state_manager import preserve_sidebar_state
-        preserve_sidebar_state()
-        st.rerun()
+             del st.query_params["poly_pts"]
             
     # --- 4️⃣ RENDER IMAGE ---
     if st.session_state.get("image") is not None:
