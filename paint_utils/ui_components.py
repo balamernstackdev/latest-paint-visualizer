@@ -202,14 +202,14 @@ def st_canvas(*args, **kwargs):
         if "background_image" in kwargs:
             del kwargs["background_image"]
             
-    # Filter unsupported kwargs (for Streamlit Cloud compatibility with older versions)
-    import inspect
-    sig = inspect.signature(raw_st_canvas)
-    supported_kwargs = set(sig.parameters.keys())
-    
-    filtered_kwargs = {k: v for k, v in kwargs.items() if k in supported_kwargs}
-            
-    return raw_st_canvas(*args, **filtered_kwargs)
+    try:
+        return raw_st_canvas(*args, **kwargs)
+    except TypeError as e:
+        if "unexpected keyword argument" in str(e):
+            kwargs.pop("display_toolbar", None)
+            kwargs.pop("point_display_radius", None)
+            return raw_st_canvas(*args, **kwargs)
+        raise e
 
 # --- STYLESS ---
 def setup_styles():
