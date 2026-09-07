@@ -598,7 +598,7 @@ def render_zoom_controls():
         st.session_state["canvas_id"] = st.session_state.get("canvas_id", 0) + 1
     
     with z_col2:
-        if st.button("Γ₧û", help="Zoom Out", use_container_width=True):
+        if st.button("Γ₧û", help="Zoom Out", width="stretch"):
             update_zoom(-0.2)
             st.rerun()
             
@@ -613,13 +613,13 @@ def render_zoom_controls():
         )
             
     with z_col4:
-        if st.button("Γ₧ò", help="Zoom In", use_container_width=True):
+        if st.button("Γ₧ò", help="Zoom In", width="stretch"):
             update_zoom(0.2)
             st.rerun()
 
     if st.session_state["zoom_level"] > 1.0 or st.session_state["pan_x"] != 0.5 or st.session_state["pan_y"] != 0.5:
         st.markdown("<div style='height: 5px'></div>", unsafe_allow_html=True)
-        if st.button("≡ƒÄ» Reset View", use_container_width=True):
+        if st.button("≡ƒÄ» Reset View", width="stretch"):
             st.session_state["zoom_level"] = 1.0
             st.session_state["pan_x"] = 0.5
             st.session_state["pan_y"] = 0.5
@@ -678,8 +678,8 @@ def render_editor_fragment(display_width):
     if show_comp:
         st.markdown("### ≡ƒæü∩╕Å Comparison: Before vs After")
         c1, c2 = st.columns(2)
-        with c1: st.image(original_img, caption="Original / Before", use_container_width=True)
-        with c2: st.image(painted_img, caption="Painted / After", use_container_width=True)
+        with c1: st.image(original_img, caption="Original / Before", width="stretch")
+        with c2: st.image(painted_img, caption="Painted / After", width="stretch")
         st.divider()
     
     tool_mode = st.session_state.get("selection_tool", "Γ£¿ AI Object (Drag Box)")
@@ -690,12 +690,12 @@ def render_editor_fragment(display_width):
     if st.session_state.get("pending_selection") is not None:
         st.markdown('<div style="margin-top: 10px; margin-bottom: 10px;"></div>', unsafe_allow_html=True)
         ac_col1, ac_col2, ac_col3 = st.columns([1.2, 0.8, 1.0], gap="small")
-        with ac_col1: st.button("Γ£¿ APPLY PAINT", use_container_width=True, key="frag_apply", on_click=cb_apply_pending, type="primary")
+        with ac_col1: st.button("Γ£¿ APPLY PAINT", width="stretch", key="frag_apply", on_click=cb_apply_pending, type="primary")
         with ac_col2:
             pc = st.session_state.get("picked_color", "#8FBC8F")
             html_content = f'<div style="text-align:center; background:#FFF; padding:6px 5px; border-radius:30px; border:1px solid #E5E7EB; display:flex; align-items:center; justify-content:center; gap:4px; box-shadow:0 1px 2px rgba(0,0,0,0.05); height: 38px;"><div style="width:12px; height:12px; background-color:{pc}; border-radius:50%; border:1px solid #E5E7EB;"></div><span style="color:#1F2937; font-weight:700; font-size:0.7rem; white-space:nowrap;">{pc}</span></div>'
             st.markdown(html_content, unsafe_allow_html=True)
-        with ac_col3: st.button("≡ƒùæ∩╕Å CANCEL", use_container_width=True, key="frag_cancel", on_click=cb_cancel_pending)
+        with ac_col3: st.button("≡ƒùæ∩╕Å CANCEL", width="stretch", key="frag_cancel", on_click=cb_cancel_pending)
 
     with st.container():
         # --- ≡ƒöì INTERACTION MONITOR PLACEHOLDER ---
@@ -949,17 +949,17 @@ def render_editor_fragment(display_width):
 }})();
 </script>
 """
-        st.components.v1.html(html_code, height=0)
+        st.html(html_code, height=0)
 
         if st.session_state["masks"]:
             st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
             btn_col1, btn_col2, btn_col3 = st.columns([1, 1, 2])
             with btn_col1:
-                if st.button("ΓÅ¬ Undo Last", use_container_width=True, key="main_undo_btn", type="primary"):
+                if st.button("ΓÅ¬ Undo Last", width="stretch", key="main_undo_btn", type="primary"):
                     cb_undo()
                     st.rerun(scope="fragment")
             with btn_col2:
-                 if st.button("≡ƒùæ∩╕Å Clear All", use_container_width=True, key="main_clear_btn"):
+                 if st.button("≡ƒùæ∩╕Å Clear All", width="stretch", key="main_clear_btn"):
                     cb_clear_all()
                     st.rerun() # Full rerun to prevent fragment state desync (white screen)
 
@@ -1050,7 +1050,7 @@ def render_sidebar(sam, device_str):
         st.markdown("<h3 style='margin:0 0 15px 35px; padding:0; color:#31333F;'>Visualizer Studio</h3>", unsafe_allow_html=True)
         
         if st.session_state.get("image") is not None:
-            if st.button("≡ƒöä Reset Project / Clear All", use_container_width=True):
+            if st.button("≡ƒöä Reset Project / Clear All", width="stretch"):
                 st.session_state["image"] = None
                 st.session_state["image_path"] = None
                 st.session_state["masks"] = []
@@ -1104,7 +1104,7 @@ def render_sidebar(sam, device_str):
 
         if st.session_state.get("image") is not None:
             if st.session_state["masks"]:
-                if st.button("≡ƒÆÄ Prepare High-Res Download", use_container_width=True):
+                if st.button("≡ƒÆÄ Prepare High-Res Download", width="stretch"):
                     st.toast("Processing 4K Export...", icon="≡ƒÆÄ")
                     try:
                         original_img = st.session_state["image_original"]
@@ -1127,7 +1127,7 @@ def render_sidebar(sam, device_str):
                     except Exception as e: st.error(f"Export failed: {e}")
 
                 if st.session_state.get("last_export"):
-                    st.download_button(label="≡ƒôÑ Save Final Image", data=st.session_state["last_export"], file_name="pro_visualizer_design.png", mime="image/png", use_container_width=True)
+                    st.download_button(label="≡ƒôÑ Save Final Image", data=st.session_state["last_export"], file_name="pro_visualizer_design.png", mime="image/png", width="stretch")
             
             st.divider()
             st.subheader("≡ƒ¢á∩╕Å Selection Tool")
@@ -1155,8 +1155,8 @@ def render_sidebar(sam, device_str):
             st.divider()
             if st.session_state["masks"]:
                 col_u1, col_u2 = st.columns(2)
-                with col_u1: st.button("ΓÅ¬ Undo", use_container_width=True, on_click=cb_undo, key="sidebar_undo")
-                with col_u2: st.button("≡ƒùæ∩╕Å Clear All", use_container_width=True, on_click=cb_clear_all, key="sidebar_clear")
+                with col_u1: st.button("ΓÅ¬ Undo", width="stretch", on_click=cb_undo, key="sidebar_undo")
+                with col_u2: st.button("≡ƒùæ∩╕Å Clear All", width="stretch", on_click=cb_clear_all, key="sidebar_clear")
                 st.write("---")
                 for i in range(len(st.session_state["masks"]) - 1, -1, -1):
                     mask_data = st.session_state["masks"][i]

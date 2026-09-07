@@ -93,7 +93,7 @@ def render_zoom_controls(key_suffix="", context_class=""):
         st.session_state["canvas_id"] = st.session_state.get("canvas_id", 0) + 1
     
     with z_col2:
-        if st.button("➖", help="Zoom Out", use_container_width=True, key=f"zoom_out_{key_suffix}"):
+        if st.button("➖", help="Zoom Out", width="stretch", key=f"zoom_out_{key_suffix}"):
             from ..state_manager import preserve_sidebar_state
             preserve_sidebar_state()
             st.rerun()
@@ -109,7 +109,7 @@ def render_zoom_controls(key_suffix="", context_class=""):
         )
             
     with z_col4:
-        if st.button("➕", help="Zoom In", use_container_width=True, key=f"zoom_in_{key_suffix}"):
+        if st.button("➕", help="Zoom In", width="stretch", key=f"zoom_in_{key_suffix}"):
             from ..state_manager import preserve_sidebar_state
             preserve_sidebar_state()
             st.rerun()
@@ -119,7 +119,7 @@ def render_zoom_controls(key_suffix="", context_class=""):
         st.session_state.get("pan_x", 0.5) != 0.5 or 
         st.session_state.get("pan_y", 0.5) != 0.5):
         st.markdown("<div style='height: 5px'></div>", unsafe_allow_html=True)
-        if st.button("🎯 Reset View", use_container_width=True, key=f"reset_view_{key_suffix}"):
+        if st.button("🎯 Reset View", width="stretch", key=f"reset_view_{key_suffix}"):
             st.session_state["zoom_level"] = 1.0
             st.session_state["pan_x"] = 0.5
             st.session_state["pan_y"] = 0.5

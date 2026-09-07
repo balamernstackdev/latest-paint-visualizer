@@ -175,17 +175,14 @@ def snap_box_to_edges(image, box, margin=15):
 def st_canvas(*args, **kwargs):
     """Wrapper to handle background image conversion to data URLs."""
     kwargs["background_color"] = "rgba(0,0,0,0)"
-    if "display_toolbar" in kwargs:
-        del kwargs["display_toolbar"]
     bg_img = kwargs.get("background_image")
     
     if bg_img is not None:
         width, height = kwargs.get("width"), kwargs.get("height")
-        # PERFORMANCE: Cache key MUST include render_hash, image path, and comparison state to detect changes
+        # PERFORMANCE: Cache key MUST include render_hash and comparison state to detect changes
         comp_flag = str(st.session_state.get("show_comparison", False))
         r_hash = str(st.session_state.get("render_id", 0))
-        img_id = str(st.session_state.get("image_path", "default"))
-        cache_key = f"bg_url_cache_{img_id}_{r_hash}_{comp_flag}"
+        cache_key = f"bg_url_cache_{r_hash}_{comp_flag}"
         
         if cache_key in st.session_state:
             url = st.session_state[cache_key]
@@ -748,11 +745,11 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
             cols = st.columns([1, 1], gap="small")
             with cols[0]: 
                 # DYNAMIC LABEL BASED ON OP
-                if st.button(btn_label, use_container_width=True, key="top_frag_apply", type="primary"):
+                if st.button(btn_label, width="stretch", key="top_frag_apply", type="primary"):
                     print(f"DEBUG: PROCEEDING WITH OP: {op_label}")
                     cb_apply_pending(); safe_rerun()
             with cols[1]: 
-                if st.button("🗑️ CANCEL", use_container_width=True, key="top_frag_cancel"):
+                if st.button("🗑️ CANCEL", width="stretch", key="top_frag_cancel"):
                     cb_cancel_pending(); safe_rerun()
 
     # 1️⃣ Enforce Mode-First Rendering (BEFORE any paint logic)
@@ -906,8 +903,8 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
             # --- 🛠️ STRICT TOOL FILTERING ---
             # Only persist objects that belong to the CURRENT tool
             is_valid = False
-            # DO NOT persist point circles for AI Click as they should clear immediately after use
-            if drawing_mode == "rect" and obj_type == "rect": is_valid = True
+            if drawing_mode == "point" and obj_type == "circle": is_valid = True
+            elif drawing_mode == "rect" and obj_type == "rect": is_valid = True
             elif drawing_mode == "freedraw" and obj_type == "path": is_valid = True
             elif drawing_mode == "polygon" and obj_type == "polygon": is_valid = True
             elif drawing_mode == "transform": is_valid = True # Show all in move mode
@@ -998,19 +995,13 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                             )
                             if mask is not None:
                                 st.session_state["pending_selection"] = {'mask': mask, 'point': (real_x, real_y)}
-                                # ⚡ SMOOTH APPLY: increment canvas_id to clear drawn red dot
+                                # ⚡ SMOOTH APPLY: Don't increment canvas_id to prevent flicker, silent mode
                                 if st.session_state.get("ai_click_instant_apply", True): 
-                                    cb_apply_pending(increment_canvas=True, silent=True)
+                                    cb_apply_pending(increment_canvas=False, silent=True)
                                 
                                 st.session_state["render_id"] += 1
-                                # Force fragment rerun to push cleared canvas to the browser
-                                safe_rerun(scope="fragment")
-                            else:
-                                # AI failed to find an object. We must still clear the red dot.
-                                st.toast("⚠️ AI couldn't find an object here. Try clicking a clearer area.", icon="⚠️")
-                                st.session_state["canvas_id"] = st.session_state.get("canvas_id", 0) + 1
-                                st.session_state["canvas_raw"] = {}
-                                safe_rerun(scope="fragment")
+                                # NO EXPLICIT RERUN - Let Streamlit auto-detect state changes
+                                # safe_rerun(scope="fragment")
                         break 
             
             elif "Lasso" in tool_mode and "Polygonal" not in tool_mode:
@@ -1349,14 +1340,14 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                 with st.container(border=True):
                     b_col1, b_col2, b_col3 = st.columns([1, 0.4, 1], gap="small", vertical_alignment="center")
                     with b_col1: 
-                        if st.button("✨ APPLY", use_container_width=True, key="frag_apply", type="primary"):
+                        if st.button("✨ APPLY", width="stretch", key="frag_apply", type="primary"):
                             cb_apply_pending(); safe_rerun() # Fragment scope default
                     with b_col2: 
                         new_chosen = st.color_picker("Color", st.session_state.get("picked_color", "#8FBC8F"), label_visibility="collapsed", key="frag_pending_color")
                         if new_chosen != st.session_state.get("picked_color"):
                             st.session_state["picked_color"] = new_chosen
                     with b_col3: 
-                        if st.button("🗑️ CANCEL", use_container_width=True, key="frag_cancel"):
+                        if st.button("🗑️ CANCEL", width="stretch", key="frag_cancel"):
                             cb_cancel_pending(); safe_rerun() # Fragment scope default
 
             # --- FINAL SIGNAL CLEANUP ---
@@ -1377,13 +1368,13 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
         st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
         btn_col1, btn_col2, btn_col3 = st.columns([1, 1, 1])
         with btn_col1:
-            if st.button("⏪ Undo", use_container_width=True, key="frag_undo_btn", disabled=not st.session_state["masks"]):
+            if st.button("⏪ Undo", width="stretch", key="frag_undo_btn", disabled=not st.session_state["masks"]):
                 cb_undo(); safe_rerun()
         with btn_col2:
-            if st.button("⏩ Redo", use_container_width=True, key="frag_redo_btn", disabled=not st.session_state.get("masks_redo")):
+            if st.button("⏩ Redo", width="stretch", key="frag_redo_btn", disabled=not st.session_state.get("masks_redo")):
                 cb_redo(); safe_rerun()
         with btn_col3:
-             if st.button("🗑️ Clear", use_container_width=True, key="frag_clear_btn"):
+             if st.button("🗑️ Clear", width="stretch", key="frag_clear_btn"):
                 cb_clear_all(); safe_rerun()
 
 def render_visualizer_engine_v11(display_width):
@@ -1406,11 +1397,11 @@ def render_visualizer_engine_v11(display_width):
     #     st.segmented_control("Op", ["➕", "➖"], default="➕" if st.session_state.get("selection_op") == "Add" else "➖", key="top_op_control", label_visibility="collapsed", on_change=cb_top_op_sync)
     # with m_col4:
     #     if "Polygonal" in tool_mode:
-    #         if st.button("🏁 FINISH", use_container_width=True, key="top_poly_finish", type="primary", help="Finish the polygon and apply paint."):
+    #         if st.button("🏁 FINISH", width="stretch", key="top_poly_finish", type="primary", help="Finish the polygon and apply paint."):
     #             st.session_state["force_finish_poly"] = True
     #             safe_rerun()
     #     elif st.session_state.get("pending_selection") is not None:
-    #          if st.button("✨ APPLY", use_container_width=True, key="top_apply", type="primary"):
+    #          if st.button("✨ APPLY", width="stretch", key="top_apply", type="primary"):
     #              cb_apply_pending()
     #              safe_rerun(scope="app")
     # st.markdown('</div>', unsafe_allow_html=True)
@@ -1431,8 +1422,8 @@ def render_visualizer_engine_v11(display_width):
             base_image = st.session_state["image"]
 
         from paint_utils.image_processing import composite_image
-        with c1: st.image(base_image, caption="Original", use_container_width=True)
-        with c2: st.image(composite_image(base_image, st.session_state["masks"]), caption="Painted", use_container_width=True)
+        with c1: st.image(base_image, caption="Original", width="stretch")
+        with c2: st.image(composite_image(base_image, st.session_state["masks"]), caption="Painted", width="stretch")
         st.divider()
 
     # 3. THE CANVAS (Isolated fragment)
@@ -1496,7 +1487,7 @@ def render_sidebar(sam, device_str):
              
              # RESET BUTTON NOW INSIDE EXPANDER
              if is_image_loaded:
-                  if st.button("️ Reset Project / Clear All", use_container_width=True):
+                  if st.button("️ Reset Project / Clear All", width="stretch"):
                     st.session_state["image"] = None
                     st.session_state["image_gray"] = None
                     st.session_state["image_path"] = None
@@ -1565,7 +1556,7 @@ def render_sidebar(sam, device_str):
                 _gray_mode = st.session_state.get("grayscale_mode", False)
                 _dl_label = "💎 PREPARE HIGH-RES DOWNLOAD" + (" (Grayscale)" if _gray_mode else "")
                 _dl_filename = "visualizer_grayscale_design.png" if _gray_mode else "pro_visualizer_design.png"
-                if st.button(_dl_label, use_container_width=True, type="primary"):
+                if st.button(_dl_label, width="stretch", type="primary"):
                     st.toast("🎨 Professional Rendering in Progress...", icon="💎")
                     try:
                         original_img = st.session_state["image_original"]
@@ -1616,7 +1607,7 @@ def render_sidebar(sam, device_str):
 
                 if st.session_state.get("last_export"):
                     _dl_fn = "visualizer_grayscale_design.png" if st.session_state.get("grayscale_mode") else "pro_visualizer_design.png"
-                    st.download_button(label="📥 Save Final Image", data=st.session_state["last_export"], file_name=_dl_fn, mime="image/png", use_container_width=True)
+                    st.download_button(label="📥 Save Final Image", data=st.session_state["last_export"], file_name=_dl_fn, mime="image/png", width="stretch")
             
             
             st.markdown('<div class="sidebar-header-text">🛠️ Selection Tool</div>', unsafe_allow_html=True)
@@ -1686,11 +1677,11 @@ def render_sidebar(sam, device_str):
             if "Polygonal" in current_tool:
                 # p_colA, p_colB = st.columns(2)
                 # with p_colA:
-                #     if st.button("✅ FINISH", use_container_width=True, type="primary", key="side_poly_finish", help="Complete the shape (or triple-click last point)"):
+                #     if st.button("✅ FINISH", width="stretch", type="primary", key="side_poly_finish", help="Complete the shape (or triple-click last point)"):
                 #         st.session_state["force_finish_poly"] = True
                 #         safe_rerun()
                 # with p_colB:
-                #     if st.button("🧹 CLEAR", use_container_width=True, key="side_poly_clear", help="Clear drawing"):
+                #     if st.button("🧹 CLEAR", width="stretch", key="side_poly_clear", help="Clear drawing"):
                 #         st.session_state["canvas_id"] = st.session_state.get("canvas_id", 0) + 1
                 #         st.session_state["force_finish_poly"] = False
                 #         st.query_params.pop("poly_pts", None)
@@ -1727,7 +1718,7 @@ def render_sidebar(sam, device_str):
             #           help="**ON:** Paints the *entire* inside of your Box or Lasso selection. Best for simple walls or when AI misses details.\n\n**OFF (AI Mode):** Uses AI to intelligently find objects within your marked area.")
 
             if st.session_state.get("pending_selection") is not None or st.session_state.get("pending_boxes"):
-                if st.button("🚫 Clear Selection Draft", use_container_width=True, help="Reset the current selection without applying it."):
+                if st.button("🚫 Clear Selection Draft", width="stretch", help="Reset the current selection without applying it."):
                     st.session_state["pending_selection"] = None
                     st.session_state["pending_boxes"] = []
                     st.session_state["canvas_id"] = st.session_state.get("canvas_id", 0) + 1
@@ -1776,9 +1767,9 @@ def render_sidebar(sam, device_str):
             st.markdown('<div class="sidebar-header-text">📚 Activity Layers</div>', unsafe_allow_html=True)
             if st.session_state["masks"] or st.session_state.get("masks_redo"):
                 col_u1, col_u2, col_u3 = st.columns(3)
-                with col_u1: st.button("⏪ Undo", use_container_width=True, on_click=cb_undo, key="sidebar_undo", disabled=not st.session_state["masks"])
-                with col_u2: st.button("⏩ Redo", use_container_width=True, on_click=cb_redo, key="sidebar_redo", disabled=not st.session_state.get("masks_redo"))
-                with col_u3: st.button("🗑️ Clear", use_container_width=True, on_click=cb_clear_all, key="sidebar_clear")
+                with col_u1: st.button("⏪ Undo", width="stretch", on_click=cb_undo, key="sidebar_undo", disabled=not st.session_state["masks"])
+                with col_u2: st.button("⏩ Redo", width="stretch", on_click=cb_redo, key="sidebar_redo", disabled=not st.session_state.get("masks_redo"))
+                with col_u3: st.button("🗑️ Clear", width="stretch", on_click=cb_clear_all, key="sidebar_clear")
                 # Removed height spacer
                 for i in range(len(st.session_state["masks"]) - 1, -1, -1):
                     mask_data = st.session_state["masks"][i]
