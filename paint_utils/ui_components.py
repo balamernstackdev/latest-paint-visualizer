@@ -181,10 +181,11 @@ def st_canvas(*args, **kwargs):
     
     if bg_img is not None:
         width, height = kwargs.get("width"), kwargs.get("height")
-        # PERFORMANCE: Cache key MUST include render_hash and comparison state to detect changes
+        # PERFORMANCE: Cache key MUST include render_hash, image path, and comparison state to detect changes
         comp_flag = str(st.session_state.get("show_comparison", False))
         r_hash = str(st.session_state.get("render_id", 0))
-        cache_key = f"bg_url_cache_{r_hash}_{comp_flag}"
+        img_id = str(st.session_state.get("image_path", "default"))
+        cache_key = f"bg_url_cache_{img_id}_{r_hash}_{comp_flag}"
         
         if cache_key in st.session_state:
             url = st.session_state[cache_key]
@@ -999,7 +1000,7 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                                 st.session_state["pending_selection"] = {'mask': mask, 'point': (real_x, real_y)}
                                 # ⚡ SMOOTH APPLY: Don't increment canvas_id to prevent flicker, silent mode
                                 if st.session_state.get("ai_click_instant_apply", True): 
-                                    cb_apply_pending(increment_canvas=False, silent=True)
+                                    cb_apply_pending(increment_canvas=True, silent=True)
                                 
                                 st.session_state["render_id"] += 1
                                 # NO EXPLICIT RERUN - Let Streamlit auto-detect state changes
