@@ -906,8 +906,8 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
             # --- 🛠️ STRICT TOOL FILTERING ---
             # Only persist objects that belong to the CURRENT tool
             is_valid = False
-            if drawing_mode == "point" and obj_type == "circle": is_valid = True
-            elif drawing_mode == "rect" and obj_type == "rect": is_valid = True
+            # DO NOT persist point circles for AI Click as they should clear immediately after use
+            if drawing_mode == "rect" and obj_type == "rect": is_valid = True
             elif drawing_mode == "freedraw" and obj_type == "path": is_valid = True
             elif drawing_mode == "polygon" and obj_type == "polygon": is_valid = True
             elif drawing_mode == "transform": is_valid = True # Show all in move mode
