@@ -200,18 +200,11 @@ def st_canvas(*args, **kwargs):
             "visible": True, "src": url
         }
         if "background_image" in kwargs:
-            del kwargs["background_image"]
+             del kwargs["background_image"]
             
-    try:
-        return raw_st_canvas(*args, **kwargs)
-    except TypeError as e:
-        if "unexpected keyword argument" in str(e):
-            kwargs.pop("display_toolbar", None)
-            kwargs.pop("point_display_radius", None)
-            return raw_st_canvas(*args, **kwargs)
-        raise e
+    return raw_st_canvas(*args, **kwargs)
 
-# --- STYLESS ---
+# --- STYLES ---
 def setup_styles():
     css_path = os.path.join(os.path.dirname(__file__), "..", "assets", "style.css")
     style_content = ""
@@ -937,12 +930,12 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
         except: pass
 
     canvas_result = st_canvas(
-        fill_color="rgba(255, 75, 75, 0.5)" if drawing_mode == "point" else "rgba(255, 165, 0, 0.3)", 
-        stroke_width=2 if drawing_mode == "point" else st.session_state.get("lasso_thickness", 6), 
+        fill_color="rgba(255, 165, 0, 0.3)", 
+        stroke_width=st.session_state.get("lasso_thickness", 6), 
         stroke_color="#FF4B4B",
         background_image=final_display_image, update_streamlit=True, height=display_height, width=display_width,
         drawing_mode=drawing_mode, initial_drawing=initial_drawing, 
-        point_display_radius=4 if drawing_mode == "point" else 0,
+        point_display_radius=20 if drawing_mode in ["point", "freedraw", "polygon"] else 0,
         key=f"canvas_main_{st.session_state.get('canvas_id', 0)}", 
         display_toolbar=True
     )
