@@ -1008,9 +1008,9 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                             )
                             if mask is not None:
                                 st.session_state["pending_selection"] = {'mask': mask, 'point': (real_x, real_y)}
-                                # ⚡ SMOOTH APPLY: Don't increment canvas_id to prevent flicker, silent mode
+                                # ⚡ BULLETPROOF CLEAR: Increment canvas_id to force older versions of the canvas to clear the red dots
                                 if st.session_state.get("ai_click_instant_apply", True): 
-                                    cb_apply_pending(increment_canvas=False, silent=True)
+                                    cb_apply_pending(increment_canvas=True, silent=True)
                                 
                                 st.session_state["render_id"] += 1
                                 # NO EXPLICIT RERUN - Let Streamlit auto-detect state changes
