@@ -202,17 +202,20 @@ def st_canvas(*args, **kwargs):
         if "background_image" in kwargs:
              del kwargs["background_image"]
             
-    # FIX FOR LIVE SERVER: Ensure all potential integer arguments are python native ints to prevent JSON serialization errors
+    # FIX FOR LIVE SERVER: Ensure all potential integer arguments are python native ints
     for k in ["width", "height", "stroke_width", "point_display_radius"]:
         if k in kwargs and kwargs[k] is not None:
             kwargs[k] = int(kwargs[k])
-            
-    # FIX FOR LIVE SERVER: Filter kwargs to only those supported by the installed version of streamlit-drawable-canvas
-    import inspect
-    valid_params = inspect.signature(raw_st_canvas).parameters
-    filtered_kwargs = {k: v for k, v in kwargs.items() if k in valid_params}
-            
-    return raw_st_canvas(*args, **filtered_kwargs)
+
+    try:
+        return raw_st_canvas(*args, **kwargs)
+    except TypeError as e:
+        # Fallback for older versions of streamlit-drawable-canvas on Streamlit Cloud
+        if "display_toolbar" in kwargs:
+             del kwargs["display_toolbar"]
+        if "point_display_radius" in kwargs:
+             del kwargs["point_display_radius"]
+        return raw_st_canvas(*args, **kwargs)
 
 # --- STYLES ---
 def setup_styles():
@@ -945,7 +948,7 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
         stroke_color="#FF4B4B",
         background_image=final_display_image, update_streamlit=True, height=display_height, width=display_width,
         drawing_mode=drawing_mode, initial_drawing=initial_drawing, 
-        point_display_radius=20 if drawing_mode in ["point", "freedraw", "polygon"] else 0,
+        point_display_radius=3 if drawing_mode in ["point", "freedraw", "polygon"] else 0,
         key=f"canvas_main_{st.session_state.get('canvas_id', 0)}", 
         display_toolbar=True
     )
