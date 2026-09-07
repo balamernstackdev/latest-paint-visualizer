@@ -948,7 +948,7 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
         stroke_color="#FF4B4B",
         background_image=final_display_image, update_streamlit=True, height=display_height, width=display_width,
         drawing_mode=drawing_mode, initial_drawing=initial_drawing, 
-        point_display_radius=3 if drawing_mode in ["point", "freedraw", "polygon"] else 0,
+        point_display_radius=20 if drawing_mode in ["point", "freedraw", "polygon"] else 0,
         key=f"canvas_main_{st.session_state.get('canvas_id', 0)}", 
         display_toolbar=True
     )
