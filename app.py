@@ -165,23 +165,13 @@ def main():
                  st.toast("⚠️ No object detected.", icon="🤷‍♂️")
             
             # Clear Param
-            original_param = async_status.get("prompt_data", {}).get("original_param")
-            if original_param:
-                if st.query_params.get("box") == original_param:
-                    del st.query_params["box"]
-            else:
-                if "box" in st.query_params: 
-                    del st.query_params["box"]
+            if "box" in st.query_params: 
+                del st.query_params["box"]
 
         elif isinstance(async_status, dict) and async_status.get("status") == "error":
              st.error(f"AI Error: {async_status.get('message')}")
-             original_param = async_status.get("prompt_data", {}).get("original_param")
-             if original_param:
-                 if st.query_params.get("box") == original_param:
-                     del st.query_params["box"]
-             else:
-                 if "box" in st.query_params: 
-                     del st.query_params["box"]
+             if "box" in st.query_params: 
+                 del st.query_params["box"]
              from paint_utils.state_manager import preserve_sidebar_state
              preserve_sidebar_state()
              st.rerun()
@@ -264,8 +254,7 @@ def main():
                             prompt_data={
                                 "boxes": boxes_list, 
                                 "level": st.session_state.get("mask_level", 0),
-                                "is_wall_only": True if "Wall Click" in st.session_state.get("selection_tool", "") else st.session_state.get("is_wall_only", False),
-                                "original_param": box_param
+                                "is_wall_only": True if "Wall Click" in st.session_state.get("selection_tool", "") else st.session_state.get("is_wall_only", False)
                             }
                         )
                         st.session_state["async_task_pending"] = True
@@ -329,50 +318,44 @@ def main():
         elif isinstance(async_status, dict) and async_status.get("status") == "success":
              # Success!
              mask = async_status.get("mask")
-             prompt_data = async_status.get("prompt_data", {})
              
              if mask is not None:
                 # Need to reconstruct point coords for pending selection metadata
-                point_coords = prompt_data.get("point_coords")
-                if point_coords:
-                    real_x, real_y = point_coords[0], point_coords[1]
-                else:
-                    parts = tap_param.split(",")
-                    x, y = int(parts[0].strip()), int(parts[1].strip())
-                    img = st.session_state["image"]
-                    h, w = img.shape[:2]
-                    display_width = 800
-                    zoom = st.session_state.get("zoom_level", 1.0)
-                    pan_x = st.session_state.get("pan_x", 0.5)
-                    pan_y = st.session_state.get("pan_y", 0.5)
-                    start_x, start_y, view_w, view_h = get_crop_params(w, h, zoom, pan_x, pan_y)
-                    scale_factor = display_width / view_w
-                    real_x = int(x / scale_factor) + start_x
-                    real_y = int(y / scale_factor) + start_y
+                # We can't easily get it from async_result unless we store it.
+                # But 'tap_param' is still here. Retreive coords again just for metadata.
+                # (Optimized: we could have returned it from async task but parsing is fast)
+                parts = tap_param.split(",")
+                # ... Skipping re-parsing for brevity, just use dummy or parse quickly
+                # Re-parsing is cheap:
+                x, y = int(parts[0].strip()), int(parts[1].strip())
+                 # Scaling logic... to get real_x, real_y...
+                 # Actually, let's just assume we want to apply it.
+                
+                # We need real coords for the 'point' metadata
+                img = st.session_state["image"]
+                h, w = img.shape[:2]
+                display_width = 800
+                zoom = st.session_state.get("zoom_level", 1.0)
+                pan_x = st.session_state.get("pan_x", 0.5)
+                pan_y = st.session_state.get("pan_y", 0.5)
+                start_x, start_y, view_w, view_h = get_crop_params(w, h, zoom, pan_x, pan_y)
+                scale_factor = display_width / view_w
+                real_x = int(x / scale_factor) + start_x
+                real_y = int(y / scale_factor) + start_y
 
                 st.session_state["pending_selection"] = {'mask': mask, 'point': (real_x, real_y)}
                 st.session_state["selection_op"] = st.session_state.get("selection_op", "Add")
                 cb_apply_pending(increment_canvas=False, silent=True)
                 st.session_state["render_id"] += 1
                 
-             # Clear Param if matches
-             original_param = prompt_data.get("original_param")
-             if original_param:
-                 if st.query_params.get("tap") == original_param:
-                     del st.query_params["tap"]
-             else:
-                 if "tap" in st.query_params: 
-                     del st.query_params["tap"]
+             # Clear Param
+             if "tap" in st.query_params: 
+                 del st.query_params["tap"]
         
         elif isinstance(async_status, dict) and async_status.get("status") == "error":
              st.error(f"Tap Error: {async_status.get('message')}")
-             original_param = async_status.get("prompt_data", {}).get("original_param")
-             if original_param:
-                 if st.query_params.get("tap") == original_param:
-                     del st.query_params["tap"]
-             else:
-                 if "tap" in st.query_params: 
-                     del st.query_params["tap"]
+             if "tap" in st.query_params: 
+                 del st.query_params["tap"]
              from paint_utils.state_manager import preserve_sidebar_state
              preserve_sidebar_state()
              st.rerun()
@@ -432,8 +415,7 @@ def main():
                             prompt_data={
                                 "point_coords": [real_x, real_y], 
                                 "level": st.session_state.get("mask_level", 0),
-                                "is_wall_only": True if "Wall Click" in st.session_state.get("selection_tool", "") else st.session_state.get("is_wall_only", False),
-                                "original_param": tap_param
+                                "is_wall_only": True if "Wall Click" in st.session_state.get("selection_tool", "") else st.session_state.get("is_wall_only", False)
                             }
                         )
             except Exception as e:

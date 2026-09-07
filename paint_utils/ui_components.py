@@ -196,23 +196,13 @@ def st_canvas(*args, **kwargs):
         kwargs["initial_drawing"]["background"] = "rgba(0,0,0,0)"
         kwargs["initial_drawing"]["backgroundImage"] = {
             "type": "image", "version": "4.4.0", "originX": "left", "originY": "top",
-            "left": 0, "top": 0, "width": int(width), "height": int(height), "scaleX": 1, "scaleY": 1,
+            "left": 0, "top": 0, "width": width, "height": height, "scaleX": 1, "scaleY": 1,
             "visible": True, "src": url
         }
         if "background_image" in kwargs:
              del kwargs["background_image"]
             
-    # Ensure all potential integer arguments are python native ints to prevent JSON serialization errors
-    for k in ["width", "height", "stroke_width", "point_display_radius"]:
-        if k in kwargs and kwargs[k] is not None:
-            kwargs[k] = int(kwargs[k])
-            
-    # Filter kwargs to only those supported by the installed version of streamlit-drawable-canvas
-    import inspect
-    valid_params = inspect.signature(raw_st_canvas).parameters
-    filtered_kwargs = {k: v for k, v in kwargs.items() if k in valid_params}
-            
-    return raw_st_canvas(*args, **filtered_kwargs)
+    return raw_st_canvas(*args, **kwargs)
 
 # --- STYLES ---
 def setup_styles():
@@ -574,40 +564,22 @@ def sidebar_paint_fragment():
     st.subheader("🖌️ Paint Mode")
     active_color = st.session_state.get("picked_color", "#8FBC8F")
     
-    try:
-        from paint_utils.color_data import lookup_berger_color
-    except ImportError:
-        lookup_berger_color = None
-        
     with st.container(border=True):
         col_p, col_t = st.columns([0.3, 0.7])
+        active_color = st.session_state.get("picked_color", "#8FBC8F")
         with col_p:
             new_color = st.color_picker("Color", active_color, label_visibility="collapsed", key="sidebar_paint_cp")
-            
-        # --- AUTO-CORRECT BERGER SHADE CODES ---
-        # If the user pasted a Berger shade code (like 1A0366) directly into the color picker,
-        # it will be returned as a standard hex (e.g., "#1a0366"). We check if the hex without '#'
-        # matches any known Berger code, and if so, map it to the TRUE color.
-        display_name = "Active Paint"
-        if lookup_berger_color is not None:
-            raw_hex = new_color.lstrip("#").upper()
-            result = lookup_berger_color(raw_hex)
-            if result:
-                new_color = result["hex"].upper()
-                display_name = result["name"]
-                
         with col_t:
              st.markdown(f"""
              <div style="display: flex; flex-direction: column; justify-content: center; height: 35px;">
-                <span style="font-family: 'Segoe UI', sans-serif; font-weight: 700; color: #31333F; font-size: 14px; line-height: 1.2;">{display_name}</span>
+                <span style="font-family: 'Segoe UI', sans-serif; font-weight: 700; color: #31333F; font-size: 14px; line-height: 1.2;">Active Paint</span>
                 <span style="color: #666; font-size: 11px; font-family: monospace;">{new_color}</span>
              </div>
              """, unsafe_allow_html=True)
     
     if new_color != active_color:
         st.session_state["picked_color"] = new_color
-        # Force a rerun so the color picker UI updates to the auto-corrected Berger hex color
-        safe_rerun("fragment")
+        # No rerun needed here as fragment handles local update
 
 
 def render_zoom_controls(key_suffix="", context_class=""):
@@ -951,7 +923,7 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
             if pts:
                 initial_drawing["objects"].append({
                     "type": "polygon", "points": pts,
-                    "left": 0, "top": 0, "width": int(display_width), "height": int(display_height),
+                    "left": 0, "top": 0, "width": display_width, "height": display_height,
                     "fill": "rgba(255, 75, 75, 0.2)", "stroke": "#FF4B4B", "strokeWidth": 3,
                     "selectable": False, "evented": False
                 })

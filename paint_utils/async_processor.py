@@ -62,10 +62,10 @@ def run_async_sam_task(sam_engine, image, prompt_type, prompt_data, **kwargs):
                      else: accumulated = np.logical_or(accumulated, m)
              mask = accumulated
         
-        return {"status": "success", "mask": mask, "prompt_data": prompt_data}
+        return {"status": "success", "mask": mask}
         
     except Exception as e:
-        return {"status": "error", "message": str(e), "prompt_data": prompt_data}
+        return {"status": "error", "message": str(e)}
 
 def submit_sam_task(sam_engine, image, prompt_type, prompt_data):
     """Submits a SAM task to the executor."""
