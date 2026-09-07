@@ -211,7 +211,7 @@ def st_canvas(*args, **kwargs):
             
     return raw_st_canvas(*args, **filtered_kwargs)
 
-# --- STYLES ---
+# --- STYLESS ---
 def setup_styles():
     css_path = os.path.join(os.path.dirname(__file__), "..", "assets", "style.css")
     style_content = ""
