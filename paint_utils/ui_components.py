@@ -202,7 +202,14 @@ def st_canvas(*args, **kwargs):
         if "background_image" in kwargs:
             del kwargs["background_image"]
             
-    return raw_st_canvas(*args, **kwargs)
+    # Filter unsupported kwargs (for Streamlit Cloud compatibility with older versions)
+    import inspect
+    sig = inspect.signature(raw_st_canvas)
+    supported_kwargs = set(sig.parameters.keys())
+    
+    filtered_kwargs = {k: v for k, v in kwargs.items() if k in supported_kwargs}
+            
+    return raw_st_canvas(*args, **filtered_kwargs)
 
 # --- STYLES ---
 def setup_styles():
