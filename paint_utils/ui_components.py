@@ -196,26 +196,13 @@ def st_canvas(*args, **kwargs):
         kwargs["initial_drawing"]["background"] = "rgba(0,0,0,0)"
         kwargs["initial_drawing"]["backgroundImage"] = {
             "type": "image", "version": "4.4.0", "originX": "left", "originY": "top",
-            "left": 0, "top": 0, "width": int(width), "height": int(height), "scaleX": 1, "scaleY": 1,
+            "left": 0, "top": 0, "width": width, "height": height, "scaleX": 1, "scaleY": 1,
             "visible": True, "src": url
         }
         if "background_image" in kwargs:
              del kwargs["background_image"]
             
-    # FIX FOR LIVE SERVER: Ensure all potential integer arguments are python native ints
-    for k in ["width", "height", "stroke_width", "point_display_radius"]:
-        if k in kwargs and kwargs[k] is not None:
-            kwargs[k] = int(kwargs[k])
-
-    try:
-        return raw_st_canvas(*args, **kwargs)
-    except TypeError as e:
-        # Fallback for older versions of streamlit-drawable-canvas on Streamlit Cloud
-        if "display_toolbar" in kwargs:
-             del kwargs["display_toolbar"]
-        if "point_display_radius" in kwargs:
-             del kwargs["point_display_radius"]
-        return raw_st_canvas(*args, **kwargs)
+    return raw_st_canvas(*args, **kwargs)
 
 # --- STYLES ---
 def setup_styles():
@@ -936,7 +923,7 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
             if pts:
                 initial_drawing["objects"].append({
                     "type": "polygon", "points": pts,
-                    "left": 0, "top": 0, "width": int(display_width), "height": int(display_height),
+                    "left": 0, "top": 0, "width": display_width, "height": display_height,
                     "fill": "rgba(255, 75, 75, 0.2)", "stroke": "#FF4B4B", "strokeWidth": 3,
                     "selectable": False, "evented": False
                 })
@@ -950,7 +937,7 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
         drawing_mode=drawing_mode, initial_drawing=initial_drawing, 
         point_display_radius=20 if drawing_mode in ["point", "freedraw", "polygon"] else 0,
         key=f"canvas_main_{st.session_state.get('canvas_id', 0)}", 
-        display_toolbar=False
+        display_toolbar=True
     )
 
     # 📱 JS Handler (Silent, no elements)
@@ -1008,9 +995,9 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                             )
                             if mask is not None:
                                 st.session_state["pending_selection"] = {'mask': mask, 'point': (real_x, real_y)}
-                                # ⚡ BULLETPROOF CLEAR: Increment canvas_id to force older versions of the canvas to clear the red dots
+                                # ⚡ SMOOTH APPLY: Don't increment canvas_id to prevent flicker, silent mode
                                 if st.session_state.get("ai_click_instant_apply", True): 
-                                    cb_apply_pending(increment_canvas=True, silent=True)
+                                    cb_apply_pending(increment_canvas=False, silent=True)
                                 
                                 st.session_state["render_id"] += 1
                                 # NO EXPLICIT RERUN - Let Streamlit auto-detect state changes
