@@ -950,7 +950,7 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
         drawing_mode=drawing_mode, initial_drawing=initial_drawing, 
         point_display_radius=20 if drawing_mode in ["point", "freedraw", "polygon"] else 0,
         key=f"canvas_main_{st.session_state.get('canvas_id', 0)}", 
-        display_toolbar=True
+        display_toolbar=False
     )
 
     # 📱 JS Handler (Silent, no elements)
