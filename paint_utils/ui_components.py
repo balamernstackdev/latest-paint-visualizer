@@ -196,13 +196,23 @@ def st_canvas(*args, **kwargs):
         kwargs["initial_drawing"]["background"] = "rgba(0,0,0,0)"
         kwargs["initial_drawing"]["backgroundImage"] = {
             "type": "image", "version": "4.4.0", "originX": "left", "originY": "top",
-            "left": 0, "top": 0, "width": width, "height": height, "scaleX": 1, "scaleY": 1,
+            "left": 0, "top": 0, "width": int(width), "height": int(height), "scaleX": 1, "scaleY": 1,
             "visible": True, "src": url
         }
         if "background_image" in kwargs:
              del kwargs["background_image"]
             
-    return raw_st_canvas(*args, **kwargs)
+    # FIX FOR LIVE SERVER: Ensure all potential integer arguments are python native ints to prevent JSON serialization errors
+    for k in ["width", "height", "stroke_width", "point_display_radius"]:
+        if k in kwargs and kwargs[k] is not None:
+            kwargs[k] = int(kwargs[k])
+            
+    # FIX FOR LIVE SERVER: Filter kwargs to only those supported by the installed version of streamlit-drawable-canvas
+    import inspect
+    valid_params = inspect.signature(raw_st_canvas).parameters
+    filtered_kwargs = {k: v for k, v in kwargs.items() if k in valid_params}
+            
+    return raw_st_canvas(*args, **filtered_kwargs)
 
 # --- STYLES ---
 def setup_styles():
@@ -923,7 +933,7 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
             if pts:
                 initial_drawing["objects"].append({
                     "type": "polygon", "points": pts,
-                    "left": 0, "top": 0, "width": display_width, "height": display_height,
+                    "left": 0, "top": 0, "width": int(display_width), "height": int(display_height),
                     "fill": "rgba(255, 75, 75, 0.2)", "stroke": "#FF4B4B", "strokeWidth": 3,
                     "selectable": False, "evented": False
                 })
