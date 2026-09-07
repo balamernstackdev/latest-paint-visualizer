@@ -200,7 +200,7 @@ def st_canvas(*args, **kwargs):
             "visible": True, "src": url
         }
         if "background_image" in kwargs:
-             del kwargs["background_image"]
+            del kwargs["background_image"]
             
     return raw_st_canvas(*args, **kwargs)
 
