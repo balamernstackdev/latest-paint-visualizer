@@ -998,13 +998,13 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                             )
                             if mask is not None:
                                 st.session_state["pending_selection"] = {'mask': mask, 'point': (real_x, real_y)}
-                                # ⚡ SMOOTH APPLY: Don't increment canvas_id to prevent flicker, silent mode
+                                # ⚡ SMOOTH APPLY: increment canvas_id to clear drawn red dot
                                 if st.session_state.get("ai_click_instant_apply", True): 
                                     cb_apply_pending(increment_canvas=True, silent=True)
                                 
                                 st.session_state["render_id"] += 1
-                                # NO EXPLICIT RERUN - Let Streamlit auto-detect state changes
-                                # safe_rerun(scope="fragment")
+                                # Force fragment rerun to push cleared canvas to the browser
+                                safe_rerun(scope="fragment")
                         break 
             
             elif "Lasso" in tool_mode and "Polygonal" not in tool_mode:
