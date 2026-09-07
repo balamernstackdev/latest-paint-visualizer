@@ -1005,6 +1005,12 @@ def render_visualizer_canvas_fragment_v11(display_width, start_x, start_y, view_
                                 st.session_state["render_id"] += 1
                                 # Force fragment rerun to push cleared canvas to the browser
                                 safe_rerun(scope="fragment")
+                            else:
+                                # AI failed to find an object. We must still clear the red dot.
+                                st.toast("⚠️ AI couldn't find an object here. Try clicking a clearer area.", icon="⚠️")
+                                st.session_state["canvas_id"] = st.session_state.get("canvas_id", 0) + 1
+                                st.session_state["canvas_raw"] = {}
+                                safe_rerun(scope="fragment")
                         break 
             
             elif "Lasso" in tool_mode and "Polygonal" not in tool_mode:
