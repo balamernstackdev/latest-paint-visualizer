@@ -175,6 +175,8 @@ def snap_box_to_edges(image, box, margin=15):
 def st_canvas(*args, **kwargs):
     """Wrapper to handle background image conversion to data URLs."""
     kwargs["background_color"] = "rgba(0,0,0,0)"
+    if "display_toolbar" in kwargs:
+        del kwargs["display_toolbar"]
     bg_img = kwargs.get("background_image")
     
     if bg_img is not None:
